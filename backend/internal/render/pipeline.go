@@ -1,0 +1,400 @@
+package render
+
+import (
+	"archive/zip"
+	"context"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/abstractmelon/onshape-replay/internal/ffmpeg"
+	"github.com/abstractmelon/onshape-replay/internal/onshape"
+	"github.com/abstractmelon/onshape-replay/internal/storage"
+)
+
+// Dependencies groups the external services the pipeline needs.
+type Dependencies struct {
+	Onshape *onshape.Client
+	Encoder *ffmpeg.Encoder
+	Queue   *Queue
+	Log     *slog.Logger
+	StorageRoot string
+}
+
+// StartPipeline launches the render pipeline in a background goroutine.
+// It returns immediately; progress is observable via Queue.Subscribe.
+func StartPipeline(job *Job, deps Dependencies) {
+	ctx, cancel := context.WithCancel(context.Background())
+	deps.Queue.mu.Lock()
+	job.cancel = cancel
+	job.progress = newProgressBroadcaster()
+	deps.Queue.mu.Unlock()
+
+	go func() {
+		defer cancel()
+		err := runPipeline(ctx, job, deps)
+		if err != nil && ctx.Err() == nil {
+			// Non-cancellation error.
+			deps.Log.Error("pipeline failed", "jobId", job.ID, "err", err)
+			deps.Queue.SetStatus(job.ID, StatusFailed, err.Error())
+			// Write a failure manifest so the job is recorded on disk.
+			paths := storage.Layout(deps.StorageRoot, job.DocumentID, job.ElementID, job.ID)
+			failManifest := &storage.Manifest{
+				JobID:       job.ID,
+				DocumentID:  job.DocumentID,
+				WorkspaceID: job.WorkspaceID,
+				ElementID:   job.ElementID,
+				ExportConfig: job.Config,
+				Status:      storage.StatusFailed,
+				ErrorMsg:    err.Error(),
+				CreatedAt:   job.CreatedAt,
+				StartedAt:   job.StartedAt,
+				CompletedAt: job.CompletedAt,
+			}
+			if mErr := storage.WriteManifest(paths.Manifest, failManifest); mErr != nil {
+				deps.Log.Error("failed to write failure manifest", "err", mErr)
+			}
+		}
+	}()
+}
+
+// runPipeline is the synchronous render logic running inside a goroutine.
+func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
+	log := deps.Log.With("jobId", job.ID)
+	paths := storage.Layout(deps.StorageRoot, job.DocumentID, job.ElementID, job.ID)
+
+	// Ensure directories exist before any writes.
+	if err := storage.EnsureJobDirs(paths); err != nil {
+		return err
+	}
+
+	deps.Queue.SetStatus(job.ID, StatusRunning, "")
+	startedAt := time.Now()
+
+	// Create a temporary workspace (branch) for rollback manipulation.
+	log.Info("creating temporary workspace")
+	branchName := fmt.Sprintf("onshape-replay-%s", job.ID[:8])
+	tempWsID, err := deps.Onshape.CreateWorkspace(ctx, job.DocumentID, job.WorkspaceID, branchName)
+	if err != nil {
+		return fmt.Errorf("create workspace: %w", err)
+	}
+	log.Info("temporary workspace created", "workspaceId", tempWsID)
+
+	// Store the temp workspace ID so the cancel handler can clean it up.
+	deps.Queue.mu.Lock()
+	job.TempWorkspaceID = tempWsID
+	deps.Queue.mu.Unlock()
+
+	// Deferred cleanup: always delete the temp workspace, even on panic or cancel.
+	defer func() {
+		cleanCtx := context.Background() // must not use the job ctx; it may be cancelled.
+		log.Info("deleting temporary workspace", "workspaceId", tempWsID)
+		if dErr := deps.Onshape.DeleteWorkspace(cleanCtx, job.DocumentID, tempWsID); dErr != nil {
+			log.Error("failed to delete temporary workspace", "err", dErr)
+		}
+	}()
+
+	// Check for cancellation before starting expensive work.
+	if err := ctx.Err(); err != nil {
+		deps.Queue.SetStatus(job.ID, StatusCancelled, "cancelled before feature capture")
+		return nil
+	}
+
+	// Get the feature list from the temp workspace.
+	log.Info("fetching feature list")
+	features, err := deps.Onshape.GetFeatureList(ctx, job.DocumentID, "w", tempWsID, job.ElementID)
+	if err != nil {
+		return fmt.Errorf("get feature list: %w", err)
+	}
+	log.Info("feature list retrieved", "count", len(features))
+
+	deps.Queue.mu.Lock()
+	job.Features = features
+	deps.Queue.mu.Unlock()
+
+	cfg := job.Config
+	res := ffmpeg.DefaultResolution
+	if r, ok := ffmpeg.Resolutions[cfg.Resolution]; ok {
+		res = r
+	}
+
+	// Build the list of features to capture after applying filters.
+	type captureStep struct {
+		featureIndex int    // 1-based rollback position
+		feature      onshape.Feature
+	}
+
+	var steps []captureStep
+	for i, f := range features {
+		if shouldSkip(f, cfg) {
+			continue
+		}
+		steps = append(steps, captureStep{featureIndex: i + 1, feature: f})
+	}
+
+	// Add hold frames at start and end.
+	total := len(steps)
+	if total == 0 {
+		return fmt.Errorf("no features to render after applying filters")
+	}
+
+	frameIndex := 1 // 1-based frame counter for file naming.
+
+	writeFrame := func(pngBytes []byte) error {
+		framePath := storage.FramePath(paths, frameIndex)
+		if err := os.WriteFile(framePath, pngBytes, 0o644); err != nil {
+			return fmt.Errorf("write frame %d: %w", frameIndex, err)
+		}
+		frameIndex++
+		return nil
+	}
+
+	viewCfg := onshape.ShadedViewConfig{
+		OutputWidth:     res.Width,
+		OutputHeight:    res.Height,
+		ShowAllParts:    true,
+		UseAntiAliasing: true,
+		BgColor:         cfg.BgColor,
+		Transparent:     cfg.Transparent,
+	}
+	setViewMatrix(cfg.CameraMode, &viewCfg)
+
+	// Capture loop.
+	for stepIdx, step := range steps {
+		if err := ctx.Err(); err != nil {
+			deps.Queue.SetStatus(job.ID, StatusCancelled, "cancelled during capture")
+			return nil
+		}
+
+		// Set rollback bar to include up to and including this feature.
+		if err := deps.Onshape.SetRollback(ctx, job.DocumentID, "w", tempWsID, job.ElementID, step.featureIndex); err != nil {
+			return fmt.Errorf("set rollback to %d: %w", step.featureIndex, err)
+		}
+
+		// Capture the shaded view.
+		pngBytes, err := deps.Onshape.GetShadedView(ctx, job.DocumentID, "w", tempWsID, job.ElementID, viewCfg)
+		if err != nil {
+			return fmt.Errorf("get shaded view at step %d: %w", stepIdx, err)
+		}
+
+		// Overlay feature name text if configured.
+		if cfg.FeatureLabel {
+			labeled, err := overlayFeatureText(pngBytes, step.feature.Name)
+			if err != nil {
+				log.Warn("failed to overlay feature text", "feature", step.feature.Name, "err", err)
+			} else {
+				pngBytes = labeled
+			}
+		}
+
+		// Write hold frames for the first feature.
+		if stepIdx == 0 && cfg.HoldFirst > 0 {
+			for h := 0; h < cfg.HoldFirst; h++ {
+				if err := writeFrame(pngBytes); err != nil {
+					return err
+				}
+			}
+		}
+
+		if err := writeFrame(pngBytes); err != nil {
+			return err
+		}
+
+		// Write hold frames for the last feature.
+		if stepIdx == total-1 && cfg.HoldLast > 0 {
+			for h := 0; h < cfg.HoldLast; h++ {
+				if err := writeFrame(pngBytes); err != nil {
+					return err
+				}
+			}
+		}
+
+		deps.Queue.UpdateProgress(job.ID, stepIdx+1, step.feature.Name, total, startedAt)
+	}
+
+	totalFrames := frameIndex - 1
+	log.Info("frame capture complete", "frames", totalFrames)
+
+	if err := ctx.Err(); err != nil {
+		deps.Queue.SetStatus(job.ID, StatusCancelled, "cancelled after capture")
+		return nil
+	}
+
+	// FFmpeg encoding.
+	fps := cfg.FrameRate
+	if fps <= 0 {
+		fps = 24
+	}
+
+	var outputs []storage.OutputFile
+
+	frameGlob := storage.FrameGlob(paths)
+
+	if slices.Contains(cfg.Formats, "mp4") {
+		log.Info("encoding MP4")
+		if err := deps.Encoder.EncodeMP4(ctx, frameGlob, paths.OutputMP4, fps, res); err != nil {
+			return fmt.Errorf("encode MP4: %w", err)
+		}
+		size := fileSize(paths.OutputMP4)
+		outputs = append(outputs, storage.OutputFile{Format: "mp4", Path: paths.OutputMP4, Size: size})
+	}
+
+	if slices.Contains(cfg.Formats, "gif") {
+		log.Info("encoding GIF")
+		if err := deps.Encoder.EncodeGIF(ctx, frameGlob, paths.OutputGIF, fps, res); err != nil {
+			return fmt.Errorf("encode GIF: %w", err)
+		}
+		size := fileSize(paths.OutputGIF)
+		outputs = append(outputs, storage.OutputFile{Format: "gif", Path: paths.OutputGIF, Size: size})
+	}
+
+	if slices.Contains(cfg.Formats, "zip") {
+		log.Info("creating ZIP")
+		if err := createZIP(paths); err != nil {
+			return fmt.Errorf("create ZIP: %w", err)
+		}
+		size := fileSize(paths.OutputZIP)
+		outputs = append(outputs, storage.OutputFile{Format: "zip", Path: paths.OutputZIP, Size: size})
+	}
+
+	if slices.Contains(cfg.Formats, "png") {
+		// PNG sequence: frames are already on disk, just record them.
+		outputs = append(outputs, storage.OutputFile{Format: "png", Path: paths.FramesDir, Size: 0})
+	}
+
+	deps.Queue.SetOutputs(job.ID, outputs)
+	deps.Queue.SetStatus(job.ID, StatusCompleted, "")
+
+	// Convert features to storage-local type for the manifest.
+	storeFeatures := make([]storage.Feature, len(job.Features))
+	for i, f := range job.Features {
+		storeFeatures[i] = storage.Feature{
+			ID:         f.ID,
+			Name:       f.Name,
+			Type:       f.Type,
+			Suppressed: f.Suppressed,
+		}
+	}
+
+	// Write manifest to disk.
+	manifest := &storage.Manifest{
+		JobID:        job.ID,
+		DocumentID:   job.DocumentID,
+		WorkspaceID:  job.WorkspaceID,
+		ElementID:    job.ElementID,
+		ExportConfig: cfg,
+		Features:     storeFeatures,
+		Status:       storage.StatusCompleted,
+		CreatedAt:    job.CreatedAt,
+		StartedAt:    job.StartedAt,
+		CompletedAt:  job.CompletedAt,
+		Outputs:      outputs,
+	}
+	if err := storage.WriteManifest(paths.Manifest, manifest); err != nil {
+		log.Error("failed to write manifest", "err", err)
+	}
+
+	log.Info("job completed", "outputs", len(outputs))
+	return nil
+}
+
+// shouldSkip returns true if a feature should be excluded from the render.
+func shouldSkip(f onshape.Feature, cfg storage.ExportConfig) bool {
+	if cfg.SkipSuppressed && f.Suppressed {
+		return true
+	}
+	ft := strings.ToLower(f.Type)
+	if cfg.SkipSketches && strings.Contains(ft, "sketch") {
+		return true
+	}
+	if cfg.SkipConstruction && strings.Contains(ft, "construction") {
+		return true
+	}
+	if cfg.GeometryOnly {
+		return !isGeometryFeature(ft)
+	}
+	return false
+}
+
+// isGeometryFeature returns true for feature types known to produce 3D geometry.
+func isGeometryFeature(featureType string) bool {
+	geometryTypes := []string{
+		"extrude", "revolve", "loft", "sweep", "shell", "fillet", "chamfer",
+		"hole", "boolean", "pattern", "mirror", "split", "thicken", "offset",
+		"mate", "import",
+	}
+	for _, t := range geometryTypes {
+		if strings.Contains(featureType, t) {
+			return true
+		}
+	}
+	return false
+}
+
+// setViewMatrix applies a standard camera orientation based on cameraMode.
+// The view matrices below are standard isometric/front/top orientations
+// compatible with Onshape's shadedViews viewMatrix parameter format.
+func setViewMatrix(cameraMode string, cfg *onshape.ShadedViewConfig) {
+	switch strings.ToLower(cameraMode) {
+	case "isometric":
+		// Standard isometric view matrix.
+		cfg.ViewMatrix = "0.7071,0.4082,-0.5774,0,-0.7071,0.4082,-0.5774,0,0,0.8165,0.5774,0,0,0,0,1"
+	case "front":
+		cfg.ViewMatrix = "1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1"
+	case "top":
+		cfg.ViewMatrix = "1,0,0,0,0,0,1,0,0,-1,0,0,0,0,0,1"
+	default:
+		// "current" camera: leave ViewMatrix empty to use whatever is active.
+		cfg.ViewMatrix = ""
+	}
+}
+
+func fileSize(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+// createZIP packages all frames into a ZIP archive.
+func createZIP(paths storage.Paths) error {
+	zf, err := os.Create(paths.OutputZIP)
+	if err != nil {
+		return err
+	}
+	defer zf.Close()
+
+	w := zip.NewWriter(zf)
+	defer w.Close()
+
+	entries, err := os.ReadDir(paths.FramesDir)
+	if err != nil {
+		return err
+	}
+
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".png") {
+			continue
+		}
+		src, err := os.Open(paths.FramesDir + "/" + e.Name())
+		if err != nil {
+			return err
+		}
+		dst, err := w.Create(e.Name())
+		if err != nil {
+			src.Close()
+			return err
+		}
+		if _, err := io.Copy(dst, src); err != nil {
+			src.Close()
+			return err
+		}
+		src.Close()
+	}
+	return nil
+}
