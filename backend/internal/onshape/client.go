@@ -68,6 +68,7 @@ func (c *Client) getRaw(ctx context.Context, path string, query url.Values) ([]b
 		return nil, "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.getAccessToken())
+	req.Header.Set("Accept", "application/json;charset=UTF-8;qs=0.09")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -84,6 +85,7 @@ func (c *Client) getRaw(ctx context.Context, path string, query url.Values) ([]b
 		// Rebuild request with new token.
 		req2, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		req2.Header.Set("Authorization", "Bearer "+c.getAccessToken())
+		req2.Header.Set("Accept", "application/json;charset=UTF-8;qs=0.09")
 		resp2, err2 := c.httpClient.Do(req2)
 		if err2 != nil {
 			return nil, "", err2
@@ -127,9 +129,9 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	}
 	req.Header.Set("Authorization", "Bearer "+c.getAccessToken())
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", "application/json;charset=UTF-8;qs=0.09")
 	}
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", "application/json;charset=UTF-8;qs=0.09")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -146,9 +148,9 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 		req2, _ := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(bodyBuf))
 		req2.Header.Set("Authorization", "Bearer "+c.getAccessToken())
 		if body != nil {
-			req2.Header.Set("Content-Type", "application/json")
+			req2.Header.Set("Content-Type", "application/json;charset=UTF-8;qs=0.09")
 		}
-		req2.Header.Set("Accept", "application/json")
+		req2.Header.Set("Accept", "application/json;charset=UTF-8;qs=0.09")
 		resp2, err2 := c.httpClient.Do(req2)
 		if err2 != nil {
 			return err2

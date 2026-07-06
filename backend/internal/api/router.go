@@ -99,7 +99,12 @@ func corsMiddleware(origins []string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
 			if allowAll {
-				w.Header().Set("Access-Control-Allow-Origin", "*")
+				if origin != "" {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Vary", "Origin")
+				} else {
+					w.Header().Set("Access-Control-Allow-Origin", "*")
+				}
 			} else if origin != "" {
 				for _, o := range origins {
 					if o == origin {

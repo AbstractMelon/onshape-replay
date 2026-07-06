@@ -95,25 +95,27 @@ func (s *Store) Delete(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     cookieName,
-		Value:    "",
-		MaxAge:   -1,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteNoneMode,
+		Name:       cookieName,
+		Value:      "",
+		MaxAge:     -1,
+		Path:       "/",
+		HttpOnly:   true,
+		Secure:     true,
+		SameSite:   http.SameSiteNoneMode,
+		Partitioned: true,
 	})
 }
 
 func (s *Store) setCookie(w http.ResponseWriter, id string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     cookieName,
-		Value:    id,
-		MaxAge:   int(sessionTTL.Seconds()),
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteNoneMode,
+		Name:       cookieName,
+		Value:      id,
+		MaxAge:     int(sessionTTL.Seconds()),
+		Path:       "/",
+		HttpOnly:   true,
+		Secure:     true,
+		SameSite:   http.SameSiteNoneMode,
+		Partitioned: true,
 	})
 }
 

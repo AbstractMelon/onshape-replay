@@ -39,9 +39,9 @@ func oauthCfg(c OAuthConfig) *oauth2.Config {
 
 // Handler provides HTTP handlers for the OAuth2 flow.
 type Handler struct {
-	cfg          OAuthConfig
-	sessions     *Store
-	oauthCfgObj  *oauth2.Config
+	cfg         OAuthConfig
+	sessions    *Store
+	oauthCfgObj *oauth2.Config
 }
 
 // NewHandler constructs an OAuth handler.
@@ -84,6 +84,8 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 // CallbackHandler handles the redirect from Onshape after authorization.
 func (h *Handler) CallbackHandler(w http.ResponseWriter, r *http.Request) {
+	Logger.Log("callback handler", "state", r.URL.Query().Get("state"), "oauthState")
+
 	sess, ok := h.sessions.Get(r)
 	if !ok {
 		http.Error(w, "no session found, please start the login flow again", http.StatusBadRequest)

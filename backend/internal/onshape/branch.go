@@ -15,6 +15,7 @@ type Workspace struct {
 type createWorkspaceBody struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	WorkspaceID string `json:"workspaceId,omitempty"`
 }
 
 type createWorkspaceResponse struct {
@@ -30,6 +31,7 @@ func (c *Client) CreateWorkspace(ctx context.Context, documentID, sourceWorkspac
 	body := createWorkspaceBody{
 		Name:        name,
 		Description: "Onshape Replay temporary branch -- safe to delete",
+		WorkspaceID: sourceWorkspaceID,
 	}
 
 	var resp createWorkspaceResponse
