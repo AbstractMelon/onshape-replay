@@ -47,7 +47,9 @@ func makeEventsHandler(svc Services) http.HandlerFunc {
 
 		// If the job is already terminal, close immediately.
 		if hasSnap && snap.Status.IsTerminal() {
-			_ = sendSSEEvent(w, "done", snap)
+			if err := sendSSEEvent(w, "done", snap); err != nil {
+				svc.Log.Warn("sending terminal SSE event", "job_id", jobID, "error", err)
+			}
 			flusher.Flush()
 			return
 		}
@@ -56,8 +58,14 @@ func makeEventsHandler(svc Services) http.HandlerFunc {
 		ch, ok := svc.Queue.Subscribe(jobID)
 		if !ok {
 			// Job became terminal between the check above and here.
-			snap, _ := svc.Queue.Snapshot(jobID)
-			_ = sendSSEEvent(w, "done", snap)
+			snap, snapOk := svc.Queue.Snapshot(jobID)
+			if !snapOk {
+				svc.Log.Warn("job not found when subscribing", "job_id", jobID)
+				return
+			}
+			if err := sendSSEEvent(w, "done", snap); err != nil {
+				svc.Log.Warn("sending terminal SSE event after subscribe failure", "job_id", jobID, "error", err)
+			}
 			flusher.Flush()
 			return
 		}
@@ -83,7 +91,9 @@ func makeEventsHandler(svc Services) http.HandlerFunc {
 				if !open {
 					// Broadcaster closed (job terminal). Send final state.
 					if finalSnap, ok := svc.Queue.Snapshot(jobID); ok {
-						_ = sendSSEEvent(w, "done", finalSnap)
+						if err := sendSSEEvent(w, "done", finalSnap); err != nil {
+							svc.Log.Warn("sending final SSE event", "job_id", jobID, "error", err)
+						}
 						flusher.Flush()
 					}
 					return

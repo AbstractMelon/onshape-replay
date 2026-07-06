@@ -43,11 +43,28 @@ func (c *Client) CreateWorkspace(ctx context.Context, documentID, sourceWorkspac
 
 // DeleteWorkspace deletes a workspace (branch) from a document.
 // This is used to clean up the temporary branch created for frame capture.
+// Retries once with a refreshed token if the first attempt gets a 403.
 func (c *Client) DeleteWorkspace(ctx context.Context, documentID, workspaceID string) error {
 	path := fmt.Sprintf("/documents/d/%s/workspaces/%s", documentID, workspaceID)
 
-	if err := c.do(ctx, "DELETE", path, nil, nil, nil); err != nil {
-		return fmt.Errorf("DeleteWorkspace: %w", err)
+	err := c.do(ctx, "DELETE", path, nil, nil, nil)
+	if err == nil {
+		return nil
 	}
-	return nil
+
+	// Onshape sometimes returns 403 "Invalid API key state" when the access
+	// token has become stale for this endpoint. Try refreshing the token and
+	// retrying once.
+	if c.tokenRefresher != nil {
+		_, rErr := c.tokenRefresher(ctx)
+		if rErr != nil {
+			return fmt.Errorf("DeleteWorkspace (token refresh failed): %w", err)
+		}
+		if retryErr := c.do(ctx, "DELETE", path, nil, nil, nil); retryErr != nil {
+			return fmt.Errorf("DeleteWorkspace (retry after refresh): %w", retryErr)
+		}
+		return nil
+	}
+
+	return fmt.Errorf("DeleteWorkspace: %w", err)
 }

@@ -18,7 +18,7 @@ export interface ExportConfig {
 export const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   resolution: '1080p',
   frameRate: 24,
-  cameraMode: 'isometric',
+  cameraMode: 'current',
   bgColor: '#ffffff',
   transparent: false,
   holdFirst: 0,

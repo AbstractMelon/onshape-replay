@@ -52,7 +52,7 @@ func main() {
 		ClientID:     cfg.OAuthClientID,
 		ClientSecret: cfg.OAuthClientSecret,
 		CallbackURL:  cfg.OAuthCallbackURL,
-	}, sessions)
+	}, sessions, log)
 
 	// Onshape client factory: creates a client bound to the session's token.
 	onshapeClientFactory := func(sess *auth.Session) *onshape.Client {

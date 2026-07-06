@@ -18,15 +18,12 @@ type Feature struct {
 }
 
 // featureListResponse is the raw shape returned by getPartStudioFeatures.
+// The v6 API returns flat feature objects (NOT wrapped in a "feature" key).
 type featureListResponse struct {
-	Features []featureEntry `json:"features"`
+	Features []featureFlatEntry `json:"features"`
 }
 
-type featureEntry struct {
-	Feature featureEntryInner `json:"feature"`
-}
-
-type featureEntryInner struct {
+type featureFlatEntry struct {
 	FeatureID   string `json:"featureId"`
 	Name        string `json:"name"`
 	FeatureType string `json:"featureType"`
@@ -47,10 +44,10 @@ func (c *Client) GetFeatureList(ctx context.Context, documentID, wvmType, wvmID,
 	features := make([]Feature, 0, len(raw.Features))
 	for _, f := range raw.Features {
 		features = append(features, Feature{
-			ID:         f.Feature.FeatureID,
-			Name:       f.Feature.Name,
-			Type:       f.Feature.FeatureType,
-			Suppressed: f.Feature.Suppressed,
+			ID:         f.FeatureID,
+			Name:       f.Name,
+			Type:       f.FeatureType,
+			Suppressed: f.Suppressed,
 		})
 	}
 	return features, nil

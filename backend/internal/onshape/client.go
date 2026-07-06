@@ -77,13 +77,16 @@ func (c *Client) getRaw(ctx context.Context, path string, query url.Values) ([]b
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized && c.tokenRefresher != nil {
-		newToken, rErr := c.tokenRefresher(ctx)
+		_, rErr := c.tokenRefresher(ctx)
 		if rErr != nil {
 			return nil, "", fmt.Errorf("token refresh: %w", rErr)
 		}
-		_ = newToken
-		// Rebuild request with new token.
-		req2, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		c.log.Debug("refreshed token in getRaw")
+
+		req2, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, "", fmt.Errorf("rebuild request after refresh: %w", err)
+		}
 		req2.Header.Set("Authorization", "Bearer "+c.getAccessToken())
 		req2.Header.Set("Accept", "application/json;charset=UTF-8;qs=0.09")
 		resp2, err2 := c.httpClient.Do(req2)
@@ -92,7 +95,10 @@ func (c *Client) getRaw(ctx context.Context, path string, query url.Values) ([]b
 		}
 		defer resp2.Body.Close()
 		if resp2.StatusCode >= 400 {
-			b, _ := io.ReadAll(resp2.Body)
+			b, readErr := io.ReadAll(resp2.Body)
+			if readErr != nil {
+				return nil, "", fmt.Errorf("Onshape API %s: %d (read body: %v)", path, resp2.StatusCode, readErr)
+			}
 			return nil, "", fmt.Errorf("Onshape API %s: %d %s", path, resp2.StatusCode, string(b))
 		}
 		raw, e := io.ReadAll(resp2.Body)
@@ -100,7 +106,10 @@ func (c *Client) getRaw(ctx context.Context, path string, query url.Values) ([]b
 	}
 
 	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
+		b, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, "", fmt.Errorf("Onshape API %s: %d (read body: %v)", path, resp.StatusCode, readErr)
+		}
 		return nil, "", fmt.Errorf("Onshape API %s: %d %s", path, resp.StatusCode, string(b))
 	}
 	raw, e := io.ReadAll(resp.Body)
@@ -145,7 +154,10 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 			return fmt.Errorf("token refresh: %w", rErr)
 		}
 		// Rebuild with refreshed token and re-read from buffer.
-		req2, _ := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(bodyBuf))
+		req2, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(bodyBuf))
+		if err != nil {
+			return fmt.Errorf("rebuild request after refresh: %w", err)
+		}
 		req2.Header.Set("Authorization", "Bearer "+c.getAccessToken())
 		if body != nil {
 			req2.Header.Set("Content-Type", "application/json;charset=UTF-8;qs=0.09")
@@ -164,7 +176,10 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 
 func decodeResponse(path string, resp *http.Response, dst any) error {
 	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
+		b, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return fmt.Errorf("Onshape API %s: %d (read body: %v)", path, resp.StatusCode, readErr)
+		}
 		return fmt.Errorf("Onshape API %s: %d %s", path, resp.StatusCode, string(b))
 	}
 	if dst == nil || resp.StatusCode == http.StatusNoContent {

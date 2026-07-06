@@ -22,10 +22,9 @@ type ShadedViewConfig struct {
 	// ViewMatrix is a 4x4 column-major transformation matrix as a
 	// comma-separated string. Leave empty to use the current camera.
 	ViewMatrix string
-	// BgColor is the background color for the rendered view.
-	// Empty means Onshape default; other values are passed to outputColorMethod.
-	BgColor string
 	// Transparent requests a transparent background when the output supports it.
+	// When false, the pipeline composites the transparent PNG onto a solid
+	// background before writing the frame.
 	Transparent bool
 }
 
@@ -56,9 +55,6 @@ func (c *Client) GetShadedView(ctx context.Context, documentID, wvmType, wvmID, 
 
 	if cfg.ViewMatrix != "" {
 		q.Set("viewMatrix", cfg.ViewMatrix)
-	}
-	if cfg.BgColor != "" {
-		q.Set("outputColorMethod", cfg.BgColor)
 	}
 	if cfg.Transparent {
 		q.Set("outputColorMethod", "transparent")

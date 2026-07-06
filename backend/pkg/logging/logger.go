@@ -15,6 +15,6 @@ func New() *slog.Logger {
 // NewText returns a structured logger writing human-readable text to stdout.
 func NewText() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level: slog.LevelDebug,
 	}))
 }

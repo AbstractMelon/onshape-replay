@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -42,14 +44,19 @@ type Handler struct {
 	cfg         OAuthConfig
 	sessions    *Store
 	oauthCfgObj *oauth2.Config
+	log         *slog.Logger
 }
 
 // NewHandler constructs an OAuth handler.
-func NewHandler(cfg OAuthConfig, sessions *Store) *Handler {
+func NewHandler(cfg OAuthConfig, sessions *Store, log *slog.Logger) *Handler {
+	if log == nil {
+		log = slog.Default()
+	}
 	return &Handler{
 		cfg:         cfg,
 		sessions:    sessions,
 		oauthCfgObj: oauthCfg(cfg),
+		log:         log,
 	}
 }
 
@@ -84,29 +91,42 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 // CallbackHandler handles the redirect from Onshape after authorization.
 func (h *Handler) CallbackHandler(w http.ResponseWriter, r *http.Request) {
-	Logger.Log("callback handler", "state", r.URL.Query().Get("state"), "oauthState")
-
 	sess, ok := h.sessions.Get(r)
 	if !ok {
+		h.log.Warn("oauth callback: no session found", "remote", r.RemoteAddr)
 		http.Error(w, "no session found, please start the login flow again", http.StatusBadRequest)
 		return
 	}
 
 	state := r.URL.Query().Get("state")
 	if state != sess.OAuthState {
+		h.log.Warn("oauth callback: invalid state",
+			"session_id", sess.ID[:8],
+			"expected", sess.OAuthState[:8],
+			"got", state,
+		)
 		http.Error(w, "invalid OAuth state", http.StatusBadRequest)
 		return
 	}
 
 	code := r.URL.Query().Get("code")
 	if code == "" {
-		// User denied access.
+		errDesc := r.URL.Query().Get("error_description")
+		h.log.Info("oauth callback: authorization denied by user",
+			"session_id", sess.ID[:8],
+			"error", r.URL.Query().Get("error"),
+			"error_description", errDesc,
+		)
 		http.Error(w, "authorization denied", http.StatusForbidden)
 		return
 	}
 
 	token, err := h.oauthCfgObj.Exchange(context.Background(), code)
 	if err != nil {
+		h.log.Error("oauth callback: token exchange failed",
+			"session_id", sess.ID[:8],
+			"err", err,
+		)
 		http.Error(w, fmt.Sprintf("token exchange failed: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -154,11 +174,17 @@ func (h *Handler) RefreshToken(ctx context.Context, sess *Session, w http.Respon
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		h.log.Error("refresh token: request failed", "err", err)
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		h.log.Warn("refresh token: non-200 response",
+			"status", resp.StatusCode,
+			"body", truncate(string(body), 256),
+		)
 		return "", fmt.Errorf("refresh token request returned %d", resp.StatusCode)
 	}
 
@@ -180,4 +206,12 @@ func (h *Handler) RefreshToken(ctx context.Context, sess *Session, w http.Respon
 // Authenticated reports whether the session has a valid access token.
 func Authenticated(sess *Session) bool {
 	return sess != nil && sess.AccessToken != ""
+}
+
+// truncate shortens a string to max runes, appending "..." if truncated.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }

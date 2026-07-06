@@ -4,7 +4,6 @@ package api
 import (
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -16,15 +15,18 @@ import (
 	"github.com/abstractmelon/onshape-replay/internal/storage"
 )
 
+// authCookieName is the name of the session cookie. Must match auth.cookieName.
+const authCookieName = "oreplay_session"
+
 // Services groups all runtime dependencies passed into the router.
 type Services struct {
-	Sessions    *auth.Store
-	OAuthHandler *auth.Handler
-	Onshape     func(sess *auth.Session) *onshape.Client
-	Queue       *render.Queue
-	Encoder     *ffmpeg.Encoder
-	StorageRoot string
-	Log         *slog.Logger
+	Sessions       *auth.Store
+	OAuthHandler   *auth.Handler
+	Onshape        func(sess *auth.Session) *onshape.Client
+	Queue          *render.Queue
+	Encoder        *ffmpeg.Encoder
+	StorageRoot    string
+	Log            *slog.Logger
 	AllowedOrigins []string
 }
 
@@ -47,8 +49,19 @@ func NewRouter(svc Services) http.Handler {
 
 	// Auth status check endpoint (called by the frontend on panel load).
 	r.Get("/auth/status", func(w http.ResponseWriter, r *http.Request) {
+		_, err := r.Cookie(authCookieName)
+		noCookie := err != nil
+
 		sess, ok := svc.Sessions.Get(r)
 		if !ok || !auth.Authenticated(sess) {
+			switch {
+			case noCookie:
+				svc.Log.Debug("auth status: no session cookie", "remote", r.RemoteAddr)
+			case !ok:
+				svc.Log.Debug("auth status: session not found or expired", "remote", r.RemoteAddr)
+			default:
+				svc.Log.Debug("auth status: session has no access token", "remote", r.RemoteAddr)
+			}
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"status": "unauthenticated"})
 			return
 		}
@@ -56,7 +69,7 @@ func NewRouter(svc Services) http.Handler {
 	})
 
 	// Jobs (require authentication, no caching).
-	r.With(requireAuth(svc.Sessions), noCache).Route("/jobs", func(r chi.Router) {
+	r.With(requireAuth(svc.Sessions, svc.Log), noCache).Route("/jobs", func(r chi.Router) {
 		r.Post("/", makeStartJobHandler(svc))
 		r.Get("/current", makeCurrentJobHandler(svc))
 
@@ -77,11 +90,28 @@ func NewRouter(svc Services) http.Handler {
 }
 
 // requireAuth is middleware that rejects unauthenticated requests with 401.
-func requireAuth(sessions *auth.Store) func(http.Handler) http.Handler {
+func requireAuth(sessions *auth.Store, log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, err := r.Cookie(authCookieName)
+			noCookie := err != nil
+
 			sess, ok := sessions.Get(r)
 			if !ok || !auth.Authenticated(sess) {
+				switch {
+				case noCookie:
+					log.Warn("auth denied: no session cookie",
+						"remote", r.RemoteAddr, "path", r.URL.Path,
+					)
+				case !ok:
+					log.Warn("auth denied: session not found or expired",
+						"remote", r.RemoteAddr, "path", r.URL.Path,
+					)
+				default:
+					log.Warn("auth denied: session has no access token",
+						"remote", r.RemoteAddr, "path", r.URL.Path,
+					)
+				}
 				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
 				return
 			}
@@ -93,7 +123,6 @@ func requireAuth(sessions *auth.Store) func(http.Handler) http.Handler {
 // corsMiddleware adds CORS headers to all responses.
 func corsMiddleware(origins []string) func(http.Handler) http.Handler {
 	allowAll := len(origins) == 1 && origins[0] == "*"
-	allowed := strings.Join(origins, ", ")
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +143,6 @@ func corsMiddleware(origins []string) func(http.Handler) http.Handler {
 					}
 				}
 			}
-			_ = allowed
 
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
@@ -132,7 +160,10 @@ func corsMiddleware(origins []string) func(http.Handler) http.Handler {
 // getSession extracts the session from the request. Panics if missing (should
 // only be called in routes protected by requireAuth middleware).
 func getSession(svc Services, r *http.Request) *auth.Session {
-	sess, _ := svc.Sessions.Get(r)
+	sess, ok := svc.Sessions.Get(r)
+	if !ok {
+		svc.Log.Warn("session not found in getSession. Caller should have checked auth")
+	}
 	return sess
 }
 

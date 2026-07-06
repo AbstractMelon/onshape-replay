@@ -94,7 +94,8 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		cleanCtx := context.Background() // must not use the job ctx; it may be cancelled.
 		log.Info("deleting temporary workspace", "workspaceId", tempWsID)
 		if dErr := deps.Onshape.DeleteWorkspace(cleanCtx, job.DocumentID, tempWsID); dErr != nil {
-			log.Error("failed to delete temporary workspace", "err", dErr)
+			log.Warn("failed to delete temporary workspace; it may need manual cleanup",
+				"workspaceId", tempWsID, "err", dErr)
 		}
 	}()
 
@@ -158,10 +159,14 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		OutputHeight:    res.Height,
 		ShowAllParts:    true,
 		UseAntiAliasing: true,
-		BgColor:         cfg.BgColor,
 		Transparent:     cfg.Transparent,
 	}
 	setViewMatrix(cfg.CameraMode, &viewCfg)
+	// In a temp workspace there is no stored camera view, so fall back to
+	// isometric whenever no explicit view matrix was set.
+	if viewCfg.ViewMatrix == "" {
+		viewCfg.ViewMatrix = "isometric"
+	}
 
 	// Capture loop.
 	for stepIdx, step := range steps {
@@ -179,6 +184,17 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		pngBytes, err := deps.Onshape.GetShadedView(ctx, job.DocumentID, "w", tempWsID, job.ElementID, viewCfg)
 		if err != nil {
 			return fmt.Errorf("get shaded view at step %d: %w", stepIdx, err)
+		}
+
+		// Onshape always returns transparent PNGs. Composite onto a solid
+		// background unless the user explicitly requested transparency.
+		if !cfg.Transparent && !viewCfg.Transparent {
+			bgBytes, bgErr := addBackground(pngBytes, cfg.BgColor)
+			if bgErr != nil {
+				log.Warn("failed to add background", "err", bgErr)
+			} else {
+				pngBytes = bgBytes
+			}
 		}
 
 		// Overlay feature name text if configured.
@@ -336,19 +352,20 @@ func isGeometryFeature(featureType string) bool {
 }
 
 // setViewMatrix applies a standard camera orientation based on cameraMode.
-// The view matrices below are standard isometric/front/top orientations
-// compatible with Onshape's shadedViews viewMatrix parameter format.
+// Onshape's shadedViews API accepts named views ("isometric", "front", "top")
+// or a 12-value column-major transformation matrix.
 func setViewMatrix(cameraMode string, cfg *onshape.ShadedViewConfig) {
 	switch strings.ToLower(cameraMode) {
 	case "isometric":
-		// Standard isometric view matrix.
-		cfg.ViewMatrix = "0.7071,0.4082,-0.5774,0,-0.7071,0.4082,-0.5774,0,0,0.8165,0.5774,0,0,0,0,1"
+		cfg.ViewMatrix = "isometric"
 	case "front":
-		cfg.ViewMatrix = "1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1"
+		cfg.ViewMatrix = "front"
 	case "top":
-		cfg.ViewMatrix = "1,0,0,0,0,0,1,0,0,-1,0,0,0,0,0,1"
+		cfg.ViewMatrix = "top"
 	default:
 		// "current" camera: leave ViewMatrix empty to use whatever is active.
+		// In a temp workspace there is no stored camera, so the
+		// pipeline falls back to isometric after calling this function.
 		cfg.ViewMatrix = ""
 	}
 }

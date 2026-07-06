@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { Loader2 } from 'lucide-svelte';
-  import { parseOnshapeContext } from '$lib/onshape/context';
   import { sendApplicationInit } from '$lib/onshape/messaging';
   import {
     checkAuthStatus,
