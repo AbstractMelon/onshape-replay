@@ -35,10 +35,6 @@ type Job struct {
 
 	Features []onshape.Feature
 
-	// TempWorkspaceID is the temporary branch created for this job.
-	// It must be cleaned up when the job ends (success, failure, or cancel).
-	TempWorkspaceID string
-
 	// Progress tracking
 	CurrentFeatureIndex int
 	CurrentFeatureName  string

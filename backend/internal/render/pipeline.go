@@ -75,27 +75,26 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 	deps.Queue.SetStatus(job.ID, StatusRunning, "")
 	startedAt := time.Now()
 
-	// Create a temporary workspace (branch) for rollback manipulation.
-	log.Info("creating temporary workspace")
-	branchName := fmt.Sprintf("onshape-replay-%s", job.ID[:8])
-	tempWsID, err := deps.Onshape.CreateWorkspace(ctx, job.DocumentID, job.WorkspaceID, branchName)
+	// Get the feature list and current rollback position from the user's workspace.
+	log.Info("fetching feature list")
+	features, origRollback, err := deps.Onshape.GetFeatureList(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID)
 	if err != nil {
-		return fmt.Errorf("create workspace: %w", err)
+		return fmt.Errorf("get feature list: %w", err)
 	}
-	log.Info("temporary workspace created", "workspaceId", tempWsID)
+	log.Info("feature list retrieved", "count", len(features), "rollbackIndex", origRollback)
 
-	// Store the temp workspace ID so the cancel handler can clean it up.
 	deps.Queue.mu.Lock()
-	job.TempWorkspaceID = tempWsID
+	job.Features = features
 	deps.Queue.mu.Unlock()
 
-	// Deferred cleanup: always delete the temp workspace, even on panic or cancel.
+	// Restore the original rollback position after the job completes or fails,
+	// so the user's workspace is not left in a rolled-back state.
 	defer func() {
-		cleanCtx := context.Background() // must not use the job ctx; it may be cancelled.
-		log.Info("deleting temporary workspace", "workspaceId", tempWsID)
-		if dErr := deps.Onshape.DeleteWorkspace(cleanCtx, job.DocumentID, tempWsID); dErr != nil {
-			log.Warn("failed to delete temporary workspace; it may need manual cleanup",
-				"workspaceId", tempWsID, "err", dErr)
+		cleanCtx := context.Background()
+		log.Info("restoring rollback position", "index", origRollback)
+		if rErr := deps.Onshape.SetRollback(cleanCtx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, origRollback); rErr != nil {
+			log.Warn("failed to restore rollback; the workspace may need manual reset",
+				"err", rErr)
 		}
 	}()
 
@@ -104,18 +103,6 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		deps.Queue.SetStatus(job.ID, StatusCancelled, "cancelled before feature capture")
 		return nil
 	}
-
-	// Get the feature list from the temp workspace.
-	log.Info("fetching feature list")
-	features, err := deps.Onshape.GetFeatureList(ctx, job.DocumentID, "w", tempWsID, job.ElementID)
-	if err != nil {
-		return fmt.Errorf("get feature list: %w", err)
-	}
-	log.Info("feature list retrieved", "count", len(features))
-
-	deps.Queue.mu.Lock()
-	job.Features = features
-	deps.Queue.mu.Unlock()
 
 	cfg := job.Config
 	res := ffmpeg.DefaultResolution
@@ -162,10 +149,20 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		Transparent:     cfg.Transparent,
 	}
 	setViewMatrix(cfg.CameraMode, &viewCfg)
-	// In a temp workspace there is no stored camera view, so fall back to
-	// isometric whenever no explicit view matrix was set.
 	if viewCfg.ViewMatrix == "" {
 		viewCfg.ViewMatrix = "isometric"
+	}
+
+	// Take a test shot BEFORE any rollback to verify GetShadedView works.
+	log.Info("capturing test frame at original rollback state")
+	testPng, testErr := deps.Onshape.GetShadedView(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, viewCfg)
+	if testErr != nil {
+		log.Warn("test frame failed", "err", testErr)
+	} else {
+		log.Info("test frame received", "bytes", len(testPng))
+		if err := writeFrame(testPng); err != nil {
+			return err
+		}
 	}
 
 	// Capture loop.
@@ -175,13 +172,17 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 			return nil
 		}
 
-		// Set rollback bar to include up to and including this feature.
-		if err := deps.Onshape.SetRollback(ctx, job.DocumentID, "w", tempWsID, job.ElementID, step.featureIndex); err != nil {
-			return fmt.Errorf("set rollback to %d: %w", step.featureIndex, err)
+		// Set the rollback bar to include up to and including this feature,
+		// and wait until Onshape has actually applied the change. Onshape
+		// applies the rollback (and regenerates geometry) asynchronously, so
+		// capturing immediately yields the previous state for every frame --
+		// resulting in identical, empty screenshots.
+		if err := applyRollback(ctx, deps, job, step.featureIndex, log); err != nil {
+			return err
 		}
 
 		// Capture the shaded view.
-		pngBytes, err := deps.Onshape.GetShadedView(ctx, job.DocumentID, "w", tempWsID, job.ElementID, viewCfg)
+		pngBytes, err := deps.Onshape.GetShadedView(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, viewCfg)
 		if err != nil {
 			return fmt.Errorf("get shaded view at step %d: %w", stepIdx, err)
 		}
@@ -316,6 +317,44 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 
 	log.Info("job completed", "outputs", len(outputs))
 	return nil
+}
+
+// applyRollback sets the workspace rollback bar and blocks until Onshape has
+// actually applied the change. Onshape applies rollbacks (and regenerates
+// part geometry) asynchronously on its servers, so a shaded view captured
+// immediately after SetRollback would reflect the previous state. We confirm
+// the new rollbackIndex via GetFeatureList and retry with a short backoff
+// until it matches (or the context is cancelled).
+func applyRollback(ctx context.Context, deps Dependencies, job *Job, index int, log *slog.Logger) error {
+	const maxAttempts = 20
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		if err := deps.Onshape.SetRollback(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, index); err != nil {
+			return fmt.Errorf("set rollback to %d: %w", index, err)
+		}
+
+		_, applied, err := deps.Onshape.GetFeatureList(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID)
+		if err != nil {
+			return fmt.Errorf("verify rollback %d: %w", index, err)
+		}
+
+		if applied == index {
+			return nil
+		}
+
+		log.Debug("rollback not yet applied, retrying", "desired", index, "observed", applied, "attempt", attempt+1)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(400 * time.Millisecond):
+		}
+	}
+
+	return fmt.Errorf("rollback to %d was never applied by Onshape", index)
 }
 
 // shouldSkip returns true if a feature should be excluded from the render.

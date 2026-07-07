@@ -20,7 +20,8 @@ type Feature struct {
 // featureListResponse is the raw shape returned by getPartStudioFeatures.
 // The v6 API returns flat feature objects (NOT wrapped in a "feature" key).
 type featureListResponse struct {
-	Features []featureFlatEntry `json:"features"`
+	Features      []featureFlatEntry `json:"features"`
+	RollbackIndex int                `json:"rollbackIndex"`
 }
 
 type featureFlatEntry struct {
@@ -30,15 +31,16 @@ type featureFlatEntry struct {
 	Suppressed  bool   `json:"suppressed"`
 }
 
-// GetFeatureList returns the ordered list of features in the Part Studio.
-// wvmType is "w" for workspace, "v" for version, "m" for microversion.
-func (c *Client) GetFeatureList(ctx context.Context, documentID, wvmType, wvmID, elementID string) ([]Feature, error) {
+// GetFeatureList returns the ordered list of features in the Part Studio and
+// the current rollback bar index (1-based). wvmType is "w" for workspace,
+// "v" for version, "m" for microversion.
+func (c *Client) GetFeatureList(ctx context.Context, documentID, wvmType, wvmID, elementID string) ([]Feature, int, error) {
 	path := fmt.Sprintf("/partstudios/d/%s/%s/%s/e/%s/features",
 		documentID, wvmType, wvmID, elementID)
 
 	var raw featureListResponse
 	if err := c.get(ctx, path, nil, &raw); err != nil {
-		return nil, fmt.Errorf("GetFeatureList: %w", err)
+		return nil, 0, fmt.Errorf("GetFeatureList: %w", err)
 	}
 
 	features := make([]Feature, 0, len(raw.Features))
@@ -50,5 +52,5 @@ func (c *Client) GetFeatureList(ctx context.Context, documentID, wvmType, wvmID,
 			Suppressed: f.Suppressed,
 		})
 	}
-	return features, nil
+	return features, raw.RollbackIndex, nil
 }
