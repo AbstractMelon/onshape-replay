@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"slices"
 	"strings"
@@ -186,10 +187,18 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 			return err
 		}
 
-		// Auto-fit the camera to the studio extent. Frame-specific zoom via
-		// the Onshape bounding box API was removed because the endpoint is
-		// unreliable (returns 405), so we let Onshape auto-fit instead.
-		viewCfg.PixelSize = 0
+		// Compute the pixel size from the bounding box so the model fills the
+		// viewport. Without this, Onshape uses an arbitrary default zoom that
+		// leaves the model tiny in a large output image.
+		bbox, bboxErr := deps.Onshape.GetBoundingBoxes(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, false, false)
+		if bboxErr != nil || bbox == nil {
+			log.Warn("bounding box unavailable, falling back to auto-fit", "err", bboxErr)
+			viewCfg.PixelSize = 0
+		} else {
+			viewCfg.PixelSize = isometricPixelSize(bbox, viewCfg.OutputWidth, viewCfg.OutputHeight, 0.75)
+			log.Debug("computed pixel size from bounding box",
+				"pixelSize", viewCfg.PixelSize)
+		}
 
 		// Capture the shaded view.
 		pngBytes, err := deps.Onshape.GetShadedView(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, viewCfg)
@@ -461,6 +470,61 @@ func setViewMatrix(cameraMode string, cfg *onshape.ShadedViewConfig) {
 		// pipeline falls back to isometric after calling this function.
 		cfg.ViewMatrix = ""
 	}
+}
+
+// isometricPixelSize computes the pixelSize needed to frame the bounding box
+// within the viewport under Onshape's isometric view projection. The fill
+// parameter controls what fraction of the viewport the model should occupy
+// (e.g. 0.75 = 75% fill).
+func isometricPixelSize(bbox *onshape.BoundingBox, width, height int, fill float64) float64 {
+	cos30 := math.Cos(math.Pi / 6)
+	sin30 := math.Sin(math.Pi / 6)
+
+	// Project the 8 corners of the bbox through an isometric projection:
+	//   x_screen = (x - z) * cos(30°)
+	//   y_screen = (x + z) * sin(30°) + y
+	corners := [8][2]float64{
+		{(bbox.LowX - bbox.LowZ) * cos30, (bbox.LowX + bbox.LowZ)*sin30 + bbox.LowY},
+		{(bbox.HighX - bbox.LowZ) * cos30, (bbox.HighX + bbox.LowZ)*sin30 + bbox.LowY},
+		{(bbox.LowX - bbox.HighZ) * cos30, (bbox.LowX + bbox.HighZ)*sin30 + bbox.LowY},
+		{(bbox.HighX - bbox.HighZ) * cos30, (bbox.HighX + bbox.HighZ)*sin30 + bbox.LowY},
+		{(bbox.LowX - bbox.LowZ) * cos30, (bbox.LowX + bbox.LowZ)*sin30 + bbox.HighY},
+		{(bbox.HighX - bbox.LowZ) * cos30, (bbox.HighX + bbox.LowZ)*sin30 + bbox.HighY},
+		{(bbox.LowX - bbox.HighZ) * cos30, (bbox.LowX + bbox.HighZ)*sin30 + bbox.HighY},
+		{(bbox.HighX - bbox.HighZ) * cos30, (bbox.HighX + bbox.HighZ)*sin30 + bbox.HighY},
+	}
+
+	minX, maxX := corners[0][0], corners[0][0]
+	minY, maxY := corners[0][1], corners[0][1]
+	for _, c := range corners[1:] {
+		if c[0] < minX {
+			minX = c[0]
+		}
+		if c[0] > maxX {
+			maxX = c[0]
+		}
+		if c[1] < minY {
+			minY = c[1]
+		}
+		if c[1] > maxY {
+			maxY = c[1]
+		}
+	}
+
+	screenW := maxX - minX
+	screenH := maxY - minY
+
+	// If the bbox has no extent on screen, fall back to auto-fit.
+	if screenW <= 0 || screenH <= 0 {
+		return 0
+	}
+
+	px := screenW / (float64(width) * fill)
+	py := screenH / (float64(height) * fill)
+	if px > py {
+		return px
+	}
+	return py
 }
 
 func fileSize(path string) int64 {
