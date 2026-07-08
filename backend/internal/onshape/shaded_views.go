@@ -47,9 +47,8 @@ func (c *Client) GetShadedView(ctx context.Context, documentID, wvmType, wvmID, 
 	if cfg.OutputWidth > 0 {
 		q.Set("outputWidth", fmt.Sprintf("%d", cfg.OutputWidth))
 	}
-	if cfg.PixelSize > 0 {
-		q.Set("pixelSize", fmt.Sprintf("%f", cfg.PixelSize))
-	}
+	// Always send pixelSize — Onshape interprets 0 as "auto-fit to window".
+	q.Set("pixelSize", fmt.Sprintf("%f", cfg.PixelSize))
 	q.Set("showAllParts", boolStr(cfg.ShowAllParts))
 	q.Set("useAntiAliasing", boolStr(cfg.UseAntiAliasing))
 

@@ -60,14 +60,14 @@ type Job struct {
 // ProgressSnapshot is a point-in-time copy of job progress safe to share
 // across goroutines without holding a lock.
 type ProgressSnapshot struct {
-	JobID               string
-	Status              Status
-	CurrentFeatureIndex int
-	CurrentFeatureName  string
-	TotalFeatures       int
-	PercentComplete     float64
-	EstimatedRemaining  time.Duration
-	ErrorMsg            string
+	JobID               string        `json:"jobId"`
+	Status              Status        `json:"status"`
+	CurrentFeatureIndex int           `json:"currentFeatureIndex"`
+	CurrentFeatureName  string        `json:"currentFeatureName"`
+	TotalFeatures       int           `json:"totalFeatures"`
+	PercentComplete     float64       `json:"percentComplete"`
+	EstimatedRemaining  time.Duration `json:"estimatedRemaining"`
+	ErrorMsg            string        `json:"errorMsg"`
 }
 
 // Snapshot returns a copy of the current progress state.

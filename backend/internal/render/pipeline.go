@@ -49,6 +49,7 @@ func StartPipeline(job *Job, deps Dependencies) {
 				WorkspaceID: job.WorkspaceID,
 				ElementID:   job.ElementID,
 				ExportConfig: job.Config,
+				Features:     toStorageFeatures(job.Features),
 				Status:      storage.StatusFailed,
 				ErrorMsg:    err.Error(),
 				CreatedAt:   job.CreatedAt,
@@ -124,11 +125,15 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		steps = append(steps, captureStep{featureIndex: i + 1, feature: f})
 	}
 
-	// Add hold frames at start and end.
+	// Set total feature count on the job so API consumers see a non-zero
+	// value immediately, not just after the first frame is captured.
 	total := len(steps)
 	if total == 0 {
 		return fmt.Errorf("no features to render after applying filters")
 	}
+	deps.Queue.mu.Lock()
+	job.TotalFeatures = total
+	deps.Queue.mu.Unlock()
 
 	frameIndex := 1 // 1-based frame counter for file naming.
 
@@ -180,6 +185,11 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		if err := applyRollback(ctx, deps, job, step.featureIndex, log); err != nil {
 			return err
 		}
+
+		// Auto-fit the camera to the studio extent. Frame-specific zoom via
+		// the Onshape bounding box API was removed because the endpoint is
+		// unreliable (returns 405), so we let Onshape auto-fit instead.
+		viewCfg.PixelSize = 0
 
 		// Capture the shaded view.
 		pngBytes, err := deps.Onshape.GetShadedView(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, viewCfg)
@@ -287,15 +297,7 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 	deps.Queue.SetStatus(job.ID, StatusCompleted, "")
 
 	// Convert features to storage-local type for the manifest.
-	storeFeatures := make([]storage.Feature, len(job.Features))
-	for i, f := range job.Features {
-		storeFeatures[i] = storage.Feature{
-			ID:         f.ID,
-			Name:       f.Name,
-			Type:       f.Type,
-			Suppressed: f.Suppressed,
-		}
-	}
+	storeFeatures := toStorageFeatures(job.Features)
 
 	// Write manifest to disk.
 	manifest := &storage.Manifest{
@@ -325,16 +327,32 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 // immediately after SetRollback would reflect the previous state. We confirm
 // the new rollbackIndex via GetFeatureList and retry with a short backoff
 // until it matches (or the context is cancelled).
+//
+// Onshape's rollback bar can only rest at certain positions and occasionally
+// snaps to a neighbor of the requested index, and its update/get index
+// conventions differ by one. A single stubborn position must not abort the
+// whole render, so we accept a reported index within ±1 of the request as
+// good enough and continue. We still fail hard if the bar is wildly off
+// (e.g. stuck at the previous feature) after retrying.
 func applyRollback(ctx context.Context, deps Dependencies, job *Job, index int, log *slog.Logger) error {
-	const maxAttempts = 20
+	const maxAttempts = 3
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		if err := deps.Onshape.SetRollback(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, index); err != nil {
-			return fmt.Errorf("set rollback to %d: %w", index, err)
+		// Try the requested index first. If Onshape rejects it (e.g. 409 for
+		// an invalid position), fall back to the neighboring positions.
+		if err := trySetRollback(ctx, deps, job, index); err != nil {
+			if err2 := trySetRollback(ctx, deps, job, index-1); err2 != nil {
+				if err3 := trySetRollback(ctx, deps, job, index+1); err3 != nil {
+					return fmt.Errorf("set rollback to %d (and neighbors): %w", index, err)
+				}
+				log.Warn("rollback snapped to index-1", "desired", index)
+			} else {
+				log.Warn("rollback snapped to index-1", "desired", index)
+			}
 		}
 
 		_, applied, err := deps.Onshape.GetFeatureList(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID)
@@ -343,6 +361,15 @@ func applyRollback(ctx context.Context, deps Dependencies, job *Job, index int, 
 		}
 
 		if applied == index {
+			return nil
+		}
+
+		// Onshape often refuses to place the bar at positions that separate a
+		// folder from its children, snapping to the nearest valid neighbor
+		// instead. Accept ±1 on every attempt so we don't retry hopelessly.
+		if applied == index-1 || applied == index+1 {
+			log.Warn("rollback landed one position off; continuing",
+				"desired", index, "observed", applied)
 			return nil
 		}
 
@@ -357,8 +384,35 @@ func applyRollback(ctx context.Context, deps Dependencies, job *Job, index int, 
 	return fmt.Errorf("rollback to %d was never applied by Onshape", index)
 }
 
+// trySetRollback calls SetRollback and ignores errors only for invalid indices.
+func trySetRollback(ctx context.Context, deps Dependencies, job *Job, index int) error {
+	if index < 0 {
+		return fmt.Errorf("invalid index %d", index)
+	}
+	return deps.Onshape.SetRollback(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, index)
+}
+
+// toStorageFeatures converts onshape features into the storage-local manifest type.
+func toStorageFeatures(in []onshape.Feature) []storage.Feature {
+	out := make([]storage.Feature, len(in))
+	for i, f := range in {
+		out[i] = storage.Feature{
+			ID:         f.ID,
+			Name:       f.Name,
+			Type:       f.Type,
+			Suppressed: f.Suppressed,
+		}
+	}
+	return out
+}
+
 // shouldSkip returns true if a feature should be excluded from the render.
 func shouldSkip(f onshape.Feature, cfg storage.ExportConfig) bool {
+	// Folder features organize other features and produce no geometry, so
+	// they never get their own capture frame.
+	if f.Type == onshape.FolderType {
+		return true
+	}
 	if cfg.SkipSuppressed && f.Suppressed {
 		return true
 	}
