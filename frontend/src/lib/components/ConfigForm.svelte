@@ -26,6 +26,11 @@
     { value: 'top', label: 'Top' }
   ] as const;
 
+  const bboxModes = [
+    { value: 'once', label: 'Once (locked camera)' },
+    { value: 'each', label: 'Each frame (re-center)' }
+  ] as const;
+
   const formatOptions = [
     { value: 'mp4', label: 'MP4' },
     { value: 'gif', label: 'GIF' },
@@ -130,6 +135,24 @@
         <option value={mode.value}>{mode.label}</option>
       {/each}
     </select>
+  </div>
+
+  <div>
+    <label for="bboxMode" class="mb-1.5 block text-sm font-medium text-gray-700">
+      Bounding box zoom
+    </label>
+    <select
+      id="bboxMode"
+      bind:value={config.bboxMode}
+      class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+    >
+      {#each bboxModes as mode}
+        <option value={mode.value}>{mode.label}</option>
+      {/each}
+    </select>
+    <p class="mt-1 text-xs text-gray-500">
+      "Once" uses the completed model's bounding box for consistent framing. "Each" re-centers on the visible geometry per frame.
+    </p>
   </div>
 
   <div class="flex items-start gap-4">

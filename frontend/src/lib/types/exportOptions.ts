@@ -13,12 +13,13 @@ export interface ExportConfig {
   skipSuppressed: boolean;
   skipConstruction: boolean;
   geometryOnly: boolean;
+  bboxMode: 'once' | 'each';
 }
 
 export const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   resolution: '1080p',
-  frameRate: 24,
-  cameraMode: 'current',
+  frameRate: 6,
+  cameraMode: 'isometric',
   bgColor: '#ffffff',
   transparent: false,
   holdFirst: 0,
@@ -29,5 +30,6 @@ export const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   skipSketches: true,
   skipSuppressed: true,
   skipConstruction: false,
-  geometryOnly: false
+  geometryOnly: false,
+  bboxMode: 'once'
 };

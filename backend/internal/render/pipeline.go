@@ -19,10 +19,10 @@ import (
 
 // Dependencies groups the external services the pipeline needs.
 type Dependencies struct {
-	Onshape *onshape.Client
-	Encoder *ffmpeg.Encoder
-	Queue   *Queue
-	Log     *slog.Logger
+	Onshape     *onshape.Client
+	Encoder     *ffmpeg.Encoder
+	Queue       *Queue
+	Log         *slog.Logger
 	StorageRoot string
 }
 
@@ -45,17 +45,17 @@ func StartPipeline(job *Job, deps Dependencies) {
 			// Write a failure manifest so the job is recorded on disk.
 			paths := storage.Layout(deps.StorageRoot, job.DocumentID, job.ElementID, job.ID)
 			failManifest := &storage.Manifest{
-				JobID:       job.ID,
-				DocumentID:  job.DocumentID,
-				WorkspaceID: job.WorkspaceID,
-				ElementID:   job.ElementID,
+				JobID:        job.ID,
+				DocumentID:   job.DocumentID,
+				WorkspaceID:  job.WorkspaceID,
+				ElementID:    job.ElementID,
 				ExportConfig: job.Config,
 				Features:     toStorageFeatures(job.Features),
-				Status:      storage.StatusFailed,
-				ErrorMsg:    err.Error(),
-				CreatedAt:   job.CreatedAt,
-				StartedAt:   job.StartedAt,
-				CompletedAt: job.CompletedAt,
+				Status:       storage.StatusFailed,
+				ErrorMsg:     err.Error(),
+				CreatedAt:    job.CreatedAt,
+				StartedAt:    job.StartedAt,
+				CompletedAt:  job.CompletedAt,
 			}
 			if mErr := storage.WriteManifest(paths.Manifest, failManifest); mErr != nil {
 				deps.Log.Error("failed to write failure manifest", "err", mErr)
@@ -114,7 +114,7 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 
 	// Build the list of features to capture after applying filters.
 	type captureStep struct {
-		featureIndex int    // 1-based rollback position
+		featureIndex int // 1-based rollback position
 		feature      onshape.Feature
 	}
 
@@ -160,6 +160,9 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 	}
 
 	// Take a test shot BEFORE any rollback to verify GetShadedView works.
+	// The test frame uses Onshape's default zoom (no PixelSize sent), if
+	// the user finds that zoom perfect, they should use bboxMode="once" which
+	// derives the same pixelSize from the completed model's bounding box.
 	log.Info("capturing test frame at original rollback state")
 	testPng, testErr := deps.Onshape.GetShadedView(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, viewCfg)
 	if testErr != nil {
@@ -169,6 +172,18 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		if err := writeFrame(testPng); err != nil {
 			return err
 		}
+	}
+
+	// Get the bounding box of the completed model to compute the pixel size.
+	// In "once" mode this value is cached for every frame; in "each" mode it's
+	// only used as a fallback if the per-frame call fails.
+	cachedPixelSize, bboxErr := computePixelSize(ctx, deps, job, viewCfg)
+	if bboxErr != nil {
+		log.Warn("failed to get bounding box from completed model", "err", bboxErr)
+	}
+	if cachedPixelSize > 0 {
+		log.Info("computed pixel size from completed model bounding box",
+			"pixelSize", cachedPixelSize, "mode", cfg.BBoxMode)
 	}
 
 	// Capture loop.
@@ -187,17 +202,18 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 			return err
 		}
 
-		// Compute the pixel size from the bounding box so the model fills the
-		// viewport. Without this, Onshape uses an arbitrary default zoom that
-		// leaves the model tiny in a large output image.
-		bbox, bboxErr := deps.Onshape.GetBoundingBoxes(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, false, false)
-		if bboxErr != nil || bbox == nil {
-			log.Warn("bounding box unavailable, falling back to auto-fit", "err", bboxErr)
-			viewCfg.PixelSize = 0
-		} else {
-			viewCfg.PixelSize = isometricPixelSize(bbox, viewCfg.OutputWidth, viewCfg.OutputHeight, 0.75)
-			log.Debug("computed pixel size from bounding box",
-				"pixelSize", viewCfg.PixelSize)
+		// Determine the pixel size for this frame.
+		switch cfg.BBoxMode {
+		case "each":
+			bbox, err := deps.Onshape.GetBoundingBoxes(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, false, false)
+			if err != nil || bbox == nil {
+				log.Warn("per-frame bounding box failed, using fallback zoom", "err", err)
+				viewCfg.PixelSize = cachedPixelSize
+			} else {
+				viewCfg.PixelSize = isometricPixelSize(bbox, viewCfg.OutputWidth, viewCfg.OutputHeight, 0.75)
+			}
+		default: // "once" or unset — reuse the cached pixelSize from the completed model.
+			viewCfg.PixelSize = cachedPixelSize
 		}
 
 		// Capture the shaded view.
@@ -330,67 +346,35 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 	return nil
 }
 
-// applyRollback sets the workspace rollback bar and blocks until Onshape has
-// actually applied the change. Onshape applies rollbacks (and regenerates
-// part geometry) asynchronously on its servers, so a shaded view captured
-// immediately after SetRollback would reflect the previous state. We confirm
-// the new rollbackIndex via GetFeatureList and retry with a short backoff
-// until it matches (or the context is cancelled).
-//
-// Onshape's rollback bar can only rest at certain positions and occasionally
-// snaps to a neighbor of the requested index, and its update/get index
-// conventions differ by one. A single stubborn position must not abort the
-// whole render, so we accept a reported index within ±1 of the request as
-// good enough and continue. We still fail hard if the bar is wildly off
-// (e.g. stuck at the previous feature) after retrying.
+// applyRollback sets the workspace rollback bar. It tries the requested index
+// first; if Onshape rejects it (409 for an invalid position — e.g. inside a
+// folder group), it falls back to index-1 then index+1. Unlike earlier
+// versions, this does NOT call GetFeatureList to verify — SetRollback returns
+// 200 on success and the ±1 tolerance handles Onshape's folder-boundary snap.
+// We wait a short fixed delay after each call so Onshape can begin regenerating
+// geometry before the shaded view is captured.
 func applyRollback(ctx context.Context, deps Dependencies, job *Job, index int, log *slog.Logger) error {
-	const maxAttempts = 3
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		// Try the requested index first. If Onshape rejects it (e.g. 409 for
-		// an invalid position), fall back to the neighboring positions.
-		if err := trySetRollback(ctx, deps, job, index); err != nil {
-			if err2 := trySetRollback(ctx, deps, job, index-1); err2 != nil {
-				if err3 := trySetRollback(ctx, deps, job, index+1); err3 != nil {
-					return fmt.Errorf("set rollback to %d (and neighbors): %w", index, err)
-				}
-				log.Warn("rollback snapped to index-1", "desired", index)
-			} else {
-				log.Warn("rollback snapped to index-1", "desired", index)
+	if err := trySetRollback(ctx, deps, job, index); err != nil {
+		if err2 := trySetRollback(ctx, deps, job, index-1); err2 != nil {
+			if err3 := trySetRollback(ctx, deps, job, index+1); err3 != nil {
+				return fmt.Errorf("set rollback to %d (and neighbors): %w", index, err)
 			}
-		}
-
-		_, applied, err := deps.Onshape.GetFeatureList(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID)
-		if err != nil {
-			return fmt.Errorf("verify rollback %d: %w", index, err)
-		}
-
-		if applied == index {
-			return nil
-		}
-
-		// Onshape often refuses to place the bar at positions that separate a
-		// folder from its children, snapping to the nearest valid neighbor
-		// instead. Accept ±1 on every attempt so we don't retry hopelessly.
-		if applied == index-1 || applied == index+1 {
-			log.Warn("rollback landed one position off; continuing",
-				"desired", index, "observed", applied)
-			return nil
-		}
-
-		log.Debug("rollback not yet applied, retrying", "desired", index, "observed", applied, "attempt", attempt+1)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(400 * time.Millisecond):
+			log.Warn("rollback set to index-1", "desired", index)
+		} else {
+			log.Warn("rollback set to index-1", "desired", index)
 		}
 	}
 
-	return fmt.Errorf("rollback to %d was never applied by Onshape", index)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(200 * time.Millisecond):
+	}
+	return nil
 }
 
 // trySetRollback calls SetRollback and ignores errors only for invalid indices.
@@ -472,6 +456,18 @@ func setViewMatrix(cameraMode string, cfg *onshape.ShadedViewConfig) {
 	}
 }
 
+// computePixelSize fetches the bounding box of the completed model (at the
+// original rollback state) and returns the pixel size that frames it at 75%
+// fill. Returns 0 if the API call fails, which signals callers to use a
+// fallback (e.g. Onshape's default zoom).
+func computePixelSize(ctx context.Context, deps Dependencies, job *Job, viewCfg onshape.ShadedViewConfig) (float64, error) {
+	bbox, err := deps.Onshape.GetBoundingBoxes(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, false, false)
+	if err != nil {
+		return 0, err
+	}
+	return isometricPixelSize(bbox, viewCfg.OutputWidth, viewCfg.OutputHeight, 0.75), nil
+}
+
 // isometricPixelSize computes the pixelSize needed to frame the bounding box
 // within the viewport under Onshape's isometric view projection. The fill
 // parameter controls what fraction of the viewport the model should occupy
@@ -484,14 +480,14 @@ func isometricPixelSize(bbox *onshape.BoundingBox, width, height int, fill float
 	//   x_screen = (x - z) * cos(30°)
 	//   y_screen = (x + z) * sin(30°) + y
 	corners := [8][2]float64{
-		{(bbox.LowX - bbox.LowZ) * cos30, (bbox.LowX + bbox.LowZ)*sin30 + bbox.LowY},
-		{(bbox.HighX - bbox.LowZ) * cos30, (bbox.HighX + bbox.LowZ)*sin30 + bbox.LowY},
-		{(bbox.LowX - bbox.HighZ) * cos30, (bbox.LowX + bbox.HighZ)*sin30 + bbox.LowY},
-		{(bbox.HighX - bbox.HighZ) * cos30, (bbox.HighX + bbox.HighZ)*sin30 + bbox.LowY},
-		{(bbox.LowX - bbox.LowZ) * cos30, (bbox.LowX + bbox.LowZ)*sin30 + bbox.HighY},
-		{(bbox.HighX - bbox.LowZ) * cos30, (bbox.HighX + bbox.LowZ)*sin30 + bbox.HighY},
-		{(bbox.LowX - bbox.HighZ) * cos30, (bbox.LowX + bbox.HighZ)*sin30 + bbox.HighY},
-		{(bbox.HighX - bbox.HighZ) * cos30, (bbox.HighX + bbox.HighZ)*sin30 + bbox.HighY},
+		{(bbox.LowX - bbox.LowZ) * cos30, (bbox.LowX+bbox.LowZ)*sin30 + bbox.LowY},
+		{(bbox.HighX - bbox.LowZ) * cos30, (bbox.HighX+bbox.LowZ)*sin30 + bbox.LowY},
+		{(bbox.LowX - bbox.HighZ) * cos30, (bbox.LowX+bbox.HighZ)*sin30 + bbox.LowY},
+		{(bbox.HighX - bbox.HighZ) * cos30, (bbox.HighX+bbox.HighZ)*sin30 + bbox.LowY},
+		{(bbox.LowX - bbox.LowZ) * cos30, (bbox.LowX+bbox.LowZ)*sin30 + bbox.HighY},
+		{(bbox.HighX - bbox.LowZ) * cos30, (bbox.HighX+bbox.LowZ)*sin30 + bbox.HighY},
+		{(bbox.LowX - bbox.HighZ) * cos30, (bbox.LowX+bbox.HighZ)*sin30 + bbox.HighY},
+		{(bbox.HighX - bbox.HighZ) * cos30, (bbox.HighX+bbox.HighZ)*sin30 + bbox.HighY},
 	}
 
 	minX, maxX := corners[0][0], corners[0][0]

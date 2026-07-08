@@ -55,20 +55,21 @@ type Manifest struct {
 
 // ExportConfig is a snapshot of the user's export configuration at job-start time.
 type ExportConfig struct {
-	Resolution   string   `json:"resolution"`
-	FrameRate    int      `json:"frameRate"`
-	CameraMode   string   `json:"cameraMode"`
-	BgColor      string   `json:"bgColor"`
-	Transparent  bool     `json:"transparent"`
-	HoldFirst    int      `json:"holdFirst"`
-	HoldLast     int      `json:"holdLast"`
-	FileNaming   string   `json:"fileNaming"`
-	Formats      []string `json:"formats"`
-	FeatureLabel bool     `json:"featureLabel"`
-	SkipSketches bool     `json:"skipSketches"`
-	SkipSuppressed bool  `json:"skipSuppressed"`
-	SkipConstruction bool `json:"skipConstruction"`
-	GeometryOnly bool     `json:"geometryOnly"`
+	Resolution       string   `json:"resolution"`
+	FrameRate        int      `json:"frameRate"`
+	CameraMode       string   `json:"cameraMode"`
+	BgColor          string   `json:"bgColor"`
+	Transparent      bool     `json:"transparent"`
+	HoldFirst        int      `json:"holdFirst"`
+	HoldLast         int      `json:"holdLast"`
+	FileNaming       string   `json:"fileNaming"`
+	Formats          []string `json:"formats"`
+	FeatureLabel     bool     `json:"featureLabel"`
+	SkipSketches     bool     `json:"skipSketches"`
+	SkipSuppressed   bool     `json:"skipSuppressed"`
+	SkipConstruction bool     `json:"skipConstruction"`
+	GeometryOnly     bool     `json:"geometryOnly"`
+	BBoxMode         string   `json:"bboxMode"`
 }
 
 // OutputFile describes a generated output file.
