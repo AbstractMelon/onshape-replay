@@ -79,11 +79,11 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 
 	// Get the feature list and current rollback position from the user's workspace.
 	log.Info("fetching feature list")
-	features, origRollback, err := deps.Onshape.GetFeatureList(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID)
+	features, origRollback, maxRollbackIdx, err := deps.Onshape.GetFeatureList(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID)
 	if err != nil {
 		return fmt.Errorf("get feature list: %w", err)
 	}
-	log.Info("feature list retrieved", "count", len(features), "rollbackIndex", origRollback)
+	log.Info("feature list retrieved", "count", len(features), "rollbackIndex", origRollback, "maxRollbackIndex", maxRollbackIdx)
 
 	deps.Queue.mu.Lock()
 	job.Features = features
@@ -123,7 +123,11 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		if shouldSkip(f, cfg) {
 			continue
 		}
-		steps = append(steps, captureStep{featureIndex: i + 1, feature: f})
+		fi := i + 1
+		if fi > maxRollbackIdx {
+			fi = maxRollbackIdx
+		}
+		steps = append(steps, captureStep{featureIndex: fi, feature: f})
 	}
 
 	// Set total feature count on the job so API consumers see a non-zero
@@ -159,21 +163,6 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		viewCfg.ViewMatrix = "isometric"
 	}
 
-	// Take a test shot BEFORE any rollback to verify GetShadedView works.
-	// The test frame uses Onshape's default zoom (no PixelSize sent), if
-	// the user finds that zoom perfect, they should use bboxMode="once" which
-	// derives the same pixelSize from the completed model's bounding box.
-	log.Info("capturing test frame at original rollback state")
-	testPng, testErr := deps.Onshape.GetShadedView(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, viewCfg)
-	if testErr != nil {
-		log.Warn("test frame failed", "err", testErr)
-	} else {
-		log.Info("test frame received", "bytes", len(testPng))
-		if err := writeFrame(testPng); err != nil {
-			return err
-		}
-	}
-
 	// Get the bounding box of the completed model to compute the pixel size.
 	// In "once" mode this value is cached for every frame; in "each" mode it's
 	// only used as a fallback if the per-frame call fails.
@@ -184,6 +173,19 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 	if cachedPixelSize > 0 {
 		log.Info("computed pixel size from completed model bounding box",
 			"pixelSize", cachedPixelSize, "mode", cfg.BBoxMode)
+		viewCfg.PixelSize = cachedPixelSize
+	}
+
+	// Take a test shot BEFORE any rollback to verify GetShadedView works.
+	log.Info("capturing test frame at original rollback state")
+	testPng, testErr := deps.Onshape.GetShadedView(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, viewCfg)
+	if testErr != nil {
+		log.Warn("test frame failed", "err", testErr)
+	} else {
+		log.Info("test frame received", "bytes", len(testPng))
+		if err := writeFrame(testPng); err != nil {
+			return err
+		}
 	}
 
 	// Capture loop.
@@ -212,7 +214,7 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 			} else {
 				viewCfg.PixelSize = isometricPixelSize(bbox, viewCfg.OutputWidth, viewCfg.OutputHeight, 0.75)
 			}
-		default: // "once" or unset — reuse the cached pixelSize from the completed model.
+		default: // "once" or unset. Reuse the cached pixelSize from the completed model.
 			viewCfg.PixelSize = cachedPixelSize
 		}
 
@@ -347,28 +349,42 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 }
 
 // applyRollback sets the workspace rollback bar. It tries the requested index
-// first; if Onshape rejects it (409 for an invalid position — e.g. inside a
-// folder group), it falls back to index-1 then index+1. Unlike earlier
-// versions, this does NOT call GetFeatureList to verify — SetRollback returns
-// 200 on success and the ±1 tolerance handles Onshape's folder-boundary snap.
-// We wait a short fixed delay after each call so Onshape can begin regenerating
+// first; if Onshape rejects it (409 for an invalid position, e.g. inside a
+// folder group), it falls back to -1 (the "show all" sentinel) and then
+// scans backward from the desired index to find a valid boundary. Unlike
+// earlier versions, this does NOT call GetFeatureList to verify. We wait a
+// short fixed delay after each call so Onshape can begin regenerating
 // geometry before the shaded view is captured.
 func applyRollback(ctx context.Context, deps Dependencies, job *Job, index int, log *slog.Logger) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	if err := trySetRollback(ctx, deps, job, index); err != nil {
-		if err2 := trySetRollback(ctx, deps, job, index-1); err2 != nil {
-			if err3 := trySetRollback(ctx, deps, job, index+1); err3 != nil {
-				return fmt.Errorf("set rollback to %d (and neighbors): %w", index, err)
+	if err := trySetRollback(ctx, deps, job, index); err == nil {
+		goto wait
+	}
+
+	// The -1 sentinel is an alias for "end of the feature list" (show all).
+	// It always succeeds when the exact index is the max valid value.
+	if err := trySetRollback(ctx, deps, job, -1); err == nil {
+		log.Warn("rollback set to -1 (end of feature list)", "desired", index)
+		goto wait
+	}
+
+	// Onshape rejects rollback positions inside a folder group.
+	// Scan backward to find the nearest valid boundary.
+	for offset := 1; offset <= 5; offset++ {
+		if candidate := index - offset; candidate >= 0 {
+			if err := trySetRollback(ctx, deps, job, candidate); err == nil {
+				log.Warn("rollback set to index-offset", "desired", index, "actual", candidate, "offset", offset)
+				goto wait
 			}
-			log.Warn("rollback set to index-1", "desired", index)
-		} else {
-			log.Warn("rollback set to index-1", "desired", index)
 		}
 	}
 
+	return fmt.Errorf("set rollback to %d: no valid position found", index)
+
+wait:
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

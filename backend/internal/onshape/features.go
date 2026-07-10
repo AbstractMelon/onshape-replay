@@ -88,20 +88,23 @@ func flatten(entries []featureFlatEntry, out *[]Feature) {
 // FolderType is the featureType Onshape uses for folder features.
 const FolderType = "folder"
 
-// GetFeatureList returns the ordered list of features in the Part Studio and
-// the current rollback bar index. Folders are flattened in document order so
-// the returned indices line up with Onshape's rollbackIndex. wvmType is "w"
-// for workspace, "v" for version, "m" for microversion.
-func (c *Client) GetFeatureList(ctx context.Context, documentID, wvmType, wvmID, elementID string) ([]Feature, int, error) {
+// GetFeatureList returns the ordered list of features in the Part Studio,
+// the current rollback bar index, and the maximum valid rollback index.
+// Folders are flattened in document order so the returned indices line up
+// with Onshape's rollbackIndex. The maxRollbackIndex is the count of
+// top-level (non-flattened) features — SetRollback only accepts indices
+// in [0, maxRollbackIndex]. wvmType is "w" for workspace, "v" for version,
+// "m" for microversion.
+func (c *Client) GetFeatureList(ctx context.Context, documentID, wvmType, wvmID, elementID string) (features []Feature, origRollback int, maxRollbackIndex int, err error) {
 	path := fmt.Sprintf("/partstudios/d/%s/%s/%s/e/%s/features",
 		documentID, wvmType, wvmID, elementID)
 
 	var raw featureListResponse
 	if err := c.get(ctx, path, nil, &raw); err != nil {
-		return nil, 0, fmt.Errorf("GetFeatureList: %w", err)
+		return nil, 0, 0, fmt.Errorf("GetFeatureList: %w", err)
 	}
 
-	features := make([]Feature, 0, len(raw.Features))
+	features = make([]Feature, 0, len(raw.Features))
 	flatten(raw.Features, &features)
-	return features, raw.RollbackIndex, nil
+	return features, raw.RollbackIndex, len(raw.Features), nil
 }
