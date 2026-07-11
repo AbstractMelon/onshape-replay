@@ -185,19 +185,6 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 			viewCfg.PixelSize = cachedPixelSize
 		}
 	}
-
-	// Take a test shot BEFORE any rollback to verify GetShadedView works.
-	log.Info("capturing test frame at original rollback state")
-	testPng, testErr := deps.Onshape.GetShadedView(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, viewCfg)
-	if testErr != nil {
-		log.Warn("test frame failed", "err", testErr)
-	} else {
-		log.Info("test frame received", "bytes", len(testPng))
-		if err := writeFrame(testPng); err != nil {
-			return err
-		}
-	}
-
 	// Capture loop.
 	for stepIdx, step := range steps {
 		if err := ctx.Err(); err != nil {
