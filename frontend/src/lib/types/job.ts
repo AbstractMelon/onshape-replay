@@ -35,6 +35,7 @@ export interface ProgressSnapshot {
   percentComplete: number;
   estimatedRemaining: number;
   errorMsg: string;
+  outputs?: OutputFile[];
 }
 
 export interface FeatureManifestEntry {

@@ -275,6 +275,8 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 	totalFrames := frameIndex - 1
 	log.Info("frame capture complete", "frames", totalFrames)
 
+	deps.Queue.UpdateProgress(job.ID, total, "Encoding video...", total, startedAt)
+
 	if err := ctx.Err(); err != nil {
 		deps.Queue.SetStatus(job.ID, StatusCancelled, "cancelled after capture")
 		return nil

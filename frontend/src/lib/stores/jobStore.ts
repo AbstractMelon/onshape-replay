@@ -31,7 +31,8 @@ function createJobStore() {
               currentFeatureIndex: snapshot.currentFeatureIndex,
               totalFeatures: snapshot.totalFeatures,
               estimatedRemainingSeconds: Math.round(snapshot.estimatedRemaining / 1e9),
-              error: snapshot.errorMsg || state.job.error
+              error: snapshot.errorMsg || state.job.error,
+              outputs: snapshot.outputs ?? state.job.outputs
             }
           : null
       }));

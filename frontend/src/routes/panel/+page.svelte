@@ -58,6 +58,7 @@
 
   function handleDone(snapshot: ProgressSnapshot) {
     jobStore.applySnapshot(snapshot);
+    currentJob = $jobStore.job;
     if (eventSource) {
       eventSource.close();
       eventSource = null;
