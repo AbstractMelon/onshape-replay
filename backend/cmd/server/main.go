@@ -74,6 +74,7 @@ func main() {
 		StorageRoot:    cfg.StorageRoot,
 		Log:            log,
 		AllowedOrigins: cfg.AllowedOrigins,
+		FrontendFS:     frontendFS(),
 	}
 
 	router := api.NewRouter(svc)

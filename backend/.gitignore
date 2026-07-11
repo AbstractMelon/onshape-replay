@@ -1,1 +1,3 @@
 .storage
+frontend_dist
+!frontend_dist/.gitkeep

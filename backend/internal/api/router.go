@@ -2,8 +2,10 @@
 package api
 
 import (
+	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -28,6 +30,7 @@ type Services struct {
 	StorageRoot    string
 	Log            *slog.Logger
 	AllowedOrigins []string
+	FrontendFS     fs.FS
 }
 
 // NewRouter wires all routes and returns the HTTP handler.
@@ -89,6 +92,13 @@ func NewRouter(svc Services) http.Handler {
 	// Static file serving for PNG frames (scoped to job download path above for
 	// zip/mp4/gif; PNG sequence is served directly as frames).
 	r.Handle("/storage/*", http.StripPrefix("/storage/", http.FileServer(http.Dir(svc.StorageRoot))))
+
+	// Frontend SPA catch-all: serve embedded static files, fall back to
+	// index.html for client-side routing.
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Compress(5))
+		r.Get("/*", serveFrontend(svc.FrontendFS))
+	})
 
 	return r
 }
@@ -175,6 +185,29 @@ func getSession(svc Services, r *http.Request) *auth.Session {
 func onshapeClientForReq(svc Services, r *http.Request) *onshape.Client {
 	sess := getSession(svc, r)
 	return svc.Onshape(sess)
+}
+
+// serveFrontend returns a handler that serves the embedded SPA frontend.
+// It first tries to serve the exact path from the embedded filesystem; if the
+// file is not found, it falls back to index.html for client-side routing.
+func serveFrontend(frontend fs.FS) http.HandlerFunc {
+	fileServer := http.FileServer(http.FS(frontend))
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/")
+
+		// Check if the file exists in the embedded frontend.
+		f, err := frontend.Open(path)
+		if err != nil {
+			// Serve the SPA fallback for client-side routing.
+			r.URL.Path = "/"
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		f.Close()
+
+		fileServer.ServeHTTP(w, r)
+	}
 }
 
 // storageLayout returns the storage paths for a job.

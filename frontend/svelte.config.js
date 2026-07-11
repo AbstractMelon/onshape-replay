@@ -13,7 +13,13 @@ const config = {
 			return isExternalLibrary ? undefined : true;
 		}
 	},
-	kit: { adapter: adapter({ fallback: 'index.html' }) }
+	kit: {
+		adapter: adapter({
+			fallback: 'index.html',
+			pages: '../backend/cmd/server/frontend_dist',
+			assets: '../backend/cmd/server/frontend_dist'
+		})
+	}
 };
 
 export default config;
