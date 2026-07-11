@@ -30,9 +30,14 @@ func CapturePreview(ctx context.Context, client *onshape.Client, documentID, wvm
 		viewCfg.ViewMatrix = "isometric"
 	}
 
-	bbox, err := client.GetBoundingBoxes(ctx, documentID, wvmType, wvmID, elementID, false, false)
-	if err == nil && bbox != nil {
-		viewCfg.PixelSize = isometricPixelSize(bbox, viewCfg.OutputWidth, viewCfg.OutputHeight, 0.75)
+	if cfg.CameraViewport != "" {
+		viewCfg.PixelSize = pixelSizeFromCameraViewport(cfg.CameraViewport, viewCfg.OutputWidth, viewCfg.OutputHeight)
+	}
+	if viewCfg.PixelSize <= 0 {
+		bbox, err := client.GetBoundingBoxes(ctx, documentID, wvmType, wvmID, elementID, false, false)
+		if err == nil && bbox != nil {
+			viewCfg.PixelSize = computePixelSizeFromBBox(bbox, viewCfg, 0.75)
+		}
 	}
 
 	pngBytes, err := client.GetShadedView(ctx, documentID, wvmType, wvmID, elementID, viewCfg)

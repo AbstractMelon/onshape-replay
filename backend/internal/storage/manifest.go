@@ -59,6 +59,7 @@ type ExportConfig struct {
 	FrameRate        int      `json:"frameRate"`
 	CameraMode       string   `json:"cameraMode"`
 	ViewMatrix       string   `json:"viewMatrix,omitempty"`
+	CameraViewport   string   `json:"cameraViewport,omitempty"`
 	BgColor          string   `json:"bgColor"`
 	Transparent      bool     `json:"transparent"`
 	HoldFirst        int      `json:"holdFirst"`

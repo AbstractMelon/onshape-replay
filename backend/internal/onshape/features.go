@@ -92,7 +92,7 @@ const FolderType = "folder"
 // the current rollback bar index, and the maximum valid rollback index.
 // Folders are flattened in document order so the returned indices line up
 // with Onshape's rollbackIndex. The maxRollbackIndex is the count of
-// top-level (non-flattened) features — SetRollback only accepts indices
+// top-level (non-flattened) features. SetRollback only accepts indices
 // in [0, maxRollbackIndex]. wvmType is "w" for workspace, "v" for version,
 // "m" for microversion.
 func (c *Client) GetFeatureList(ctx context.Context, documentID, wvmType, wvmID, elementID string) (features []Feature, origRollback int, maxRollbackIndex int, err error) {

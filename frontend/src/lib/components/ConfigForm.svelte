@@ -103,25 +103,25 @@
     } else {
       config.cameraMode = value;
       config.viewMatrix = '';
+      config.cameraViewport = '';
     }
   }
 
   function selectNamedView(name: string) {
     if (!namedViews || !namedViews[name]) return;
-    const vm = namedViews[name].viewMatrix;
-    // The named views API returns a 16-element 4x4 column-major matrix, but
-    // the shaded views API expects a 12-element upper 3x4 matrix (last row
-    // of a 4x4 affine transform is always [0,0,0,1] and is omitted).
+    const nv = namedViews[name];
+    const vm = nv.viewMatrix;
+    // The named views API returns a 16-element row-major 4x4 matrix.
+    // The shaded views API expects a 12-element row-major 3x4 matrix
+    // (first 3 rows of the 4x4; the last affine row [0,0,0,1] is implicit).
     if (vm.length === 16) {
-      config.viewMatrix = [
-        vm[0], vm[1], vm[2],
-        vm[4], vm[5], vm[6],
-        vm[8], vm[9], vm[10],
-        vm[12], vm[13], vm[14]
-      ].join(',');
+      config.viewMatrix = vm.slice(0, 12).join(',');
     } else {
       config.viewMatrix = vm.join(',');
     }
+    // cameraViewport is [left, right, bottom, top] in model-space meters.
+    // Used by the backend to compute pixelSize for exact viewport framing.
+    config.cameraViewport = nv.cameraViewport.join(',');
     config.cameraMode = name;
   }
 

@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -163,17 +164,26 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		viewCfg.ViewMatrix = "isometric"
 	}
 
-	// Get the bounding box of the completed model to compute the pixel size.
-	// In "once" mode this value is cached for every frame; in "each" mode it's
-	// only used as a fallback if the per-frame call fails.
-	cachedPixelSize, bboxErr := computePixelSize(ctx, deps, job, viewCfg)
-	if bboxErr != nil {
-		log.Warn("failed to get bounding box from completed model", "err", bboxErr)
+	var cachedPixelSize float64
+	if cfg.CameraViewport != "" {
+		cachedPixelSize = pixelSizeFromCameraViewport(cfg.CameraViewport, viewCfg.OutputWidth, viewCfg.OutputHeight)
+		if cachedPixelSize > 0 {
+			log.Info("computed pixel size from named view cameraViewport",
+				"pixelSize", cachedPixelSize, "viewport", cfg.CameraViewport)
+			viewCfg.PixelSize = cachedPixelSize
+		}
 	}
-	if cachedPixelSize > 0 {
-		log.Info("computed pixel size from completed model bounding box",
-			"pixelSize", cachedPixelSize, "mode", cfg.BBoxMode)
-		viewCfg.PixelSize = cachedPixelSize
+	if cachedPixelSize <= 0 {
+		var bboxErr error
+		cachedPixelSize, bboxErr = computePixelSize(ctx, deps, job, viewCfg)
+		if bboxErr != nil {
+			log.Warn("failed to get bounding box from completed model", "err", bboxErr)
+		}
+		if cachedPixelSize > 0 {
+			log.Info("computed pixel size from bounding box",
+				"pixelSize", cachedPixelSize)
+			viewCfg.PixelSize = cachedPixelSize
+		}
 	}
 
 	// Take a test shot BEFORE any rollback to verify GetShadedView works.
@@ -205,17 +215,22 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		}
 
 		// Determine the pixel size for this frame.
-		switch cfg.BBoxMode {
-		case "each":
-			bbox, err := deps.Onshape.GetBoundingBoxes(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, false, false)
-			if err != nil || bbox == nil {
-				log.Warn("per-frame bounding box failed, using fallback zoom", "err", err)
-				viewCfg.PixelSize = cachedPixelSize
-			} else {
-				viewCfg.PixelSize = isometricPixelSize(bbox, viewCfg.OutputWidth, viewCfg.OutputHeight, 0.75)
-			}
-		default: // "once" or unset. Reuse the cached pixelSize from the completed model.
+		// Named views have a fixed cameraViewport that doesn't change per frame.
+		if cfg.CameraViewport != "" {
 			viewCfg.PixelSize = cachedPixelSize
+		} else {
+			switch cfg.BBoxMode {
+			case "each":
+				bbox, err := deps.Onshape.GetBoundingBoxes(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, false, false)
+				if err != nil || bbox == nil {
+					log.Warn("per-frame bounding box failed, using fallback zoom", "err", err)
+					viewCfg.PixelSize = cachedPixelSize
+				} else {
+					viewCfg.PixelSize = computePixelSizeFromBBox(bbox, viewCfg, 0.75)
+				}
+			default: // "once" or unset. Reuse the cached pixelSize from the completed model.
+				viewCfg.PixelSize = cachedPixelSize
+			}
 		}
 
 		// Capture the shaded view.
@@ -486,7 +501,65 @@ func computePixelSize(ctx context.Context, deps Dependencies, job *Job, viewCfg 
 	if err != nil {
 		return 0, err
 	}
-	return isometricPixelSize(bbox, viewCfg.OutputWidth, viewCfg.OutputHeight, 0.75), nil
+	return computePixelSizeFromBBox(bbox, viewCfg, 0.75), nil
+}
+
+// pixelSizeFromCameraViewport computes the pixel size from a named view's
+// cameraViewport values. The viewport is [left, right, bottom, top] in
+// model-space meters. This produces exact framing that matches the named
+// view, unlike bounding-box approximations.
+func pixelSizeFromCameraViewport(cameraViewport string, outputWidth, outputHeight int) float64 {
+	parts := strings.Split(cameraViewport, ",")
+	if len(parts) != 4 {
+		return 0
+	}
+	left, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	right, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	bottom, err3 := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64)
+	top, err4 := strconv.ParseFloat(strings.TrimSpace(parts[3]), 64)
+	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
+		return 0
+	}
+
+	viewportWidth := math.Abs(right - left)
+	viewportHeight := math.Abs(top - bottom)
+	if viewportWidth <= 0 || viewportHeight <= 0 {
+		return 0
+	}
+
+	px := viewportWidth / float64(outputWidth)
+	py := viewportHeight / float64(outputHeight)
+	if px > py {
+		return px
+	}
+	return py
+}
+
+// computePixelSizeFromBBox computes the pixel size that frames the given
+// bounding box within the viewport at the specified fill fraction. For
+// standard views (isometric, front, top) it uses the exact isometric
+// projection formula. For named/arbitrary view matrices it uses the max
+// axis-aligned extent as a rough approximation, which is good enough to
+// make the model visible even when the exact projection is unknown.
+func computePixelSizeFromBBox(bbox *onshape.BoundingBox, viewCfg onshape.ShadedViewConfig, fill float64) float64 {
+	if viewCfg.ViewMatrix == "isometric" || viewCfg.ViewMatrix == "front" || viewCfg.ViewMatrix == "top" {
+		return isometricPixelSize(bbox, viewCfg.OutputWidth, viewCfg.OutputHeight, fill)
+	}
+
+	dx := bbox.HighX - bbox.LowX
+	dy := bbox.HighY - bbox.LowY
+	dz := bbox.HighZ - bbox.LowZ
+	modelSize := math.Max(dx, math.Max(dy, dz))
+	if modelSize <= 0 {
+		return 0
+	}
+
+	viewportSize := float64(viewCfg.OutputWidth)
+	if viewCfg.OutputHeight > viewCfg.OutputWidth {
+		viewportSize = float64(viewCfg.OutputHeight)
+	}
+
+	return modelSize / (viewportSize * fill)
 }
 
 // isometricPixelSize computes the pixelSize needed to frame the bounding box

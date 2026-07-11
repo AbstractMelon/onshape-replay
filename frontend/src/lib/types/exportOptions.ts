@@ -3,6 +3,7 @@ export interface ExportConfig {
   frameRate: number;
   cameraMode: string;
   viewMatrix?: string;
+  cameraViewport?: string;
   bgColor: string;
   transparent: boolean;
   holdFirst: number;
@@ -22,6 +23,7 @@ export const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   frameRate: 6,
   cameraMode: 'isometric',
   viewMatrix: '',
+  cameraViewport: '',
   bgColor: '#ffffff',
   transparent: false,
   holdFirst: 0,
