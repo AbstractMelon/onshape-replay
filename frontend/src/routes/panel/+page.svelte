@@ -339,6 +339,7 @@
 
   {:else if state === 'configuring'}
     <ConfigForm
+      {context}
       onSubmit={handleStartJob}
       onPreview={async (cfg) => {
         if (!context) return null;

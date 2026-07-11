@@ -68,6 +68,9 @@ func NewRouter(svc Services) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "authenticated"})
 	})
 
+	// Named views (require authentication).
+	r.With(requireAuth(svc.Sessions, svc.Log), noCache).Get("/named-views", makeNamedViewsHandler(svc))
+
 	// Jobs (require authentication, no caching).
 	r.With(requireAuth(svc.Sessions, svc.Log), noCache).Route("/jobs", func(r chi.Router) {
 		r.Post("/", makeStartJobHandler(svc))

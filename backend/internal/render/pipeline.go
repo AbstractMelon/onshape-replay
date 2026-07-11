@@ -158,7 +158,7 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		UseAntiAliasing: true,
 		Transparent:     cfg.Transparent,
 	}
-	setViewMatrix(cfg.CameraMode, &viewCfg)
+	setViewMatrix(cfg.CameraMode, cfg.ViewMatrix, &viewCfg)
 	if viewCfg.ViewMatrix == "" {
 		viewCfg.ViewMatrix = "isometric"
 	}
@@ -454,9 +454,14 @@ func isGeometryFeature(featureType string) bool {
 }
 
 // setViewMatrix applies a standard camera orientation based on cameraMode.
-// Onshape's shadedViews API accepts named views ("isometric", "front", "top")
-// or a 12-value column-major transformation matrix.
-func setViewMatrix(cameraMode string, cfg *onshape.ShadedViewConfig) {
+// Onshape's shadedViews API accepts named views ("isometric", "front", "top"),
+// a 16-value column-major transformation matrix, or a named view reference.
+// If viewMatrix is non-empty it takes precedence over cameraMode.
+func setViewMatrix(cameraMode, viewMatrix string, cfg *onshape.ShadedViewConfig) {
+	if viewMatrix != "" {
+		cfg.ViewMatrix = viewMatrix
+		return
+	}
 	switch strings.ToLower(cameraMode) {
 	case "isometric":
 		cfg.ViewMatrix = "isometric"

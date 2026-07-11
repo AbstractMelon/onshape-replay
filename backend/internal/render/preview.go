@@ -25,7 +25,7 @@ func CapturePreview(ctx context.Context, client *onshape.Client, documentID, wvm
 		UseAntiAliasing: true,
 		Transparent:     cfg.Transparent,
 	}
-	setViewMatrix(cfg.CameraMode, &viewCfg)
+	setViewMatrix(cfg.CameraMode, cfg.ViewMatrix, &viewCfg)
 	if viewCfg.ViewMatrix == "" {
 		viewCfg.ViewMatrix = "isometric"
 	}

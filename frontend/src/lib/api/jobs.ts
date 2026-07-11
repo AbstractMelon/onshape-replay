@@ -95,6 +95,30 @@ export async function getJobById(jobId: string): Promise<JobResponse> {
   throw new Error(`Failed to load job (${res.status})`);
 }
 
+export interface NamedViewEntry {
+  perspective: boolean;
+  cameraViewport: number[];
+  angle: number;
+  viewMatrix: number[];
+}
+
+export type NamedViewsMap = Record<string, NamedViewEntry>;
+
+export async function fetchNamedViews(ctx: OnshapeContext): Promise<NamedViewsMap> {
+  const params = new URLSearchParams({
+    documentId: ctx.documentId ?? '',
+    workspaceId: ctx.workspaceId ?? '',
+    elementId: ctx.elementId ?? ''
+  });
+  const res = await apiFetch(`/named-views?${params.toString()}`);
+
+  if (res.status === 401) throw new AuthRequiredError();
+  if (!res.ok) throw new Error(`Failed to fetch named views (${res.status})`);
+
+  const data: { namedViews: NamedViewsMap } = await res.json();
+  return data.namedViews ?? {};
+}
+
 export async function previewCapture(
   ctx: OnshapeContext,
   config: ExportConfig

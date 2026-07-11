@@ -1,7 +1,8 @@
 export interface ExportConfig {
   resolution: '720p' | '1080p' | '4k';
   frameRate: number;
-  cameraMode: 'current' | 'isometric' | 'front' | 'top';
+  cameraMode: string;
+  viewMatrix?: string;
   bgColor: string;
   transparent: boolean;
   holdFirst: number;
@@ -20,6 +21,7 @@ export const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   resolution: '1080p',
   frameRate: 6,
   cameraMode: 'isometric',
+  viewMatrix: '',
   bgColor: '#ffffff',
   transparent: false,
   holdFirst: 0,

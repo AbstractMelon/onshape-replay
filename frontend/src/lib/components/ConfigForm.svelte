@@ -1,18 +1,22 @@
 <script lang="ts">
-  import { Play, Camera } from 'lucide-svelte';
+  import { Play, Camera, Loader2 } from 'lucide-svelte';
   import type { ExportConfig } from '../types/exportOptions';
   import { DEFAULT_EXPORT_CONFIG } from '../types/exportOptions';
+  import { fetchNamedViews, type NamedViewsMap } from '../api/jobs';
+  import type { OnshapeContext } from '../onshape/context';
 
   let {
     initialConfig = DEFAULT_EXPORT_CONFIG,
     onPreview,
     onSubmit,
-    submitError
+    submitError,
+    context
   }: {
     initialConfig?: ExportConfig;
     onPreview?: (config: ExportConfig) => Promise<Blob | null>;
     onSubmit: (config: ExportConfig) => void;
     submitError: string | null;
+    context: OnshapeContext | null;
   } = $props();
 
   let previewUrl = $state<string | null>(null);
@@ -46,7 +50,8 @@
     { value: 'current', label: 'Current camera' },
     { value: 'isometric', label: 'Isometric' },
     { value: 'front', label: 'Front' },
-    { value: 'top', label: 'Top' }
+    { value: 'top', label: 'Top' },
+    { value: '__namedview__', label: 'Named view' }
   ] as const;
 
   const bboxModes = [
@@ -64,6 +69,61 @@
   const supportsTransparency = $derived(
     config.formats.includes('png') || config.formats.includes('zip')
   );
+
+  const isNamedView = $derived(!!config.viewMatrix);
+
+  const selectedViewName = $derived(
+    isNamedView ? config.cameraMode : null
+  );
+
+  let namedViews = $state<NamedViewsMap | null>(null);
+  let namedViewsLoading = $state(false);
+  let namedViewsError = $state<string | null>(null);
+
+  async function loadNamedViews() {
+    if (namedViews || namedViewsLoading || !context?.documentId || !context?.workspaceId || !context?.elementId) return;
+    namedViewsLoading = true;
+    namedViewsError = null;
+    try {
+      const res = await fetchNamedViews(context);
+      namedViews = res;
+    } catch (err) {
+      namedViewsError = err instanceof Error ? err.message : String(err);
+    } finally {
+      namedViewsLoading = false;
+    }
+  }
+
+  function handleCameraModeChange(value: string) {
+    if (value === '__namedview__') {
+      config.cameraMode = '__namedview__';
+      if (!namedViews && !namedViewsLoading) {
+        loadNamedViews();
+      }
+    } else {
+      config.cameraMode = value;
+      config.viewMatrix = '';
+    }
+  }
+
+  function selectNamedView(name: string) {
+    if (!namedViews || !namedViews[name]) return;
+    const vm = namedViews[name].viewMatrix;
+    // The named views API returns a 16-element 4x4 column-major matrix, but
+    // the shaded views API expects a 12-element upper 3x4 matrix (last row
+    // of a 4x4 affine transform is always [0,0,0,1] and is omitted).
+    if (vm.length === 16) {
+      config.viewMatrix = [
+        vm[0], vm[1], vm[2],
+        vm[4], vm[5], vm[6],
+        vm[8], vm[9], vm[10],
+        vm[12], vm[13], vm[14]
+      ].join(',');
+    } else {
+      config.viewMatrix = vm.join(',');
+    }
+    config.cameraMode = name;
+  }
 
   function toggleFormat(format: 'mp4' | 'gif' | 'png' | 'zip') {
     if (config.formats.includes(format)) {
@@ -93,6 +153,11 @@
       config.holdLast < 0
     ) {
       validationError = 'Hold frames must be non-negative integers.';
+      return;
+    }
+
+    if (isNamedView && !config.viewMatrix) {
+      validationError = 'Select a named view or switch to a standard camera mode.';
       return;
     }
 
@@ -151,13 +216,52 @@
     </label>
     <select
       id="cameraMode"
-      bind:value={config.cameraMode}
+      value={isNamedView ? '__namedview__' : config.cameraMode}
+      onchange={(e) => handleCameraModeChange((e.target as HTMLSelectElement).value)}
       class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
     >
       {#each cameraModes as mode}
         <option value={mode.value}>{mode.label}</option>
       {/each}
     </select>
+    {#if isNamedView || config.cameraMode === '__namedview__'}
+      <div class="mt-2 space-y-2">
+        {#if namedViewsLoading}
+          <div class="flex items-center gap-2 text-sm text-gray-500">
+            <Loader2 class="h-4 w-4 animate-spin" />
+            Loading named views...
+          </div>
+        {:else if namedViewsError}
+          <p class="text-sm text-red-600">Failed to load: {namedViewsError}</p>
+          <button
+            type="button"
+            onclick={loadNamedViews}
+            class="text-sm text-blue-600 hover:underline"
+          >
+            Retry
+          </button>
+        {:else if namedViews}
+          <select
+            class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            value={selectedViewName ?? ''}
+            onchange={(e) => selectNamedView((e.target as HTMLSelectElement).value)}
+          >
+            <option value="" disabled>-- Select a named view --</option>
+            {#each Object.keys(namedViews) as name}
+              <option value={name}>{name}</option>
+            {/each}
+          </select>
+        {:else}
+          <button
+            type="button"
+            onclick={loadNamedViews}
+            class="text-sm text-blue-600 hover:underline"
+          >
+            Load named views...
+          </button>
+        {/if}
+      </div>
+    {/if}
   </div>
 
   <div>
