@@ -4,7 +4,9 @@ package api
 import (
 	"io/fs"
 	"log/slog"
+	"mime"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -188,25 +190,32 @@ func onshapeClientForReq(svc Services, r *http.Request) *onshape.Client {
 }
 
 // serveFrontend returns a handler that serves the embedded SPA frontend.
-// It first tries to serve the exact path from the embedded filesystem; if the
-// file is not found, it falls back to index.html for client-side routing.
+// It reads the file directly from the embedded filesystem and writes it with
+// the correct Content-Type. If the path is not found, it falls back to
+// index.html for client-side routing.
 func serveFrontend(frontend fs.FS) http.HandlerFunc {
-	fileServer := http.FileServer(http.FS(frontend))
-
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/")
-
-		// Check if the file exists in the embedded frontend.
-		f, err := frontend.Open(path)
-		if err != nil {
-			// Serve the SPA fallback for client-side routing.
-			r.URL.Path = "/"
-			fileServer.ServeHTTP(w, r)
-			return
+		if path == "" {
+			path = "index.html"
 		}
-		f.Close()
 
-		fileServer.ServeHTTP(w, r)
+		data, err := fs.ReadFile(frontend, path)
+		if err != nil {
+			// SPA fallback: serve index.html for client-side routing.
+			data, err = fs.ReadFile(frontend, "index.html")
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+		}
+
+		ctype := mime.TypeByExtension(filepath.Ext(path))
+		if ctype == "" {
+			ctype = http.DetectContentType(data)
+		}
+		w.Header().Set("Content-Type", ctype)
+		w.Write(data)
 	}
 }
 
