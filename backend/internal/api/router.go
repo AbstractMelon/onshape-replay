@@ -193,21 +193,24 @@ func onshapeClientForReq(svc Services, r *http.Request) *onshape.Client {
 // It reads the file directly from the embedded filesystem and writes it with
 // the correct Content-Type. If the path is not found, it falls back to
 // index.html for client-side routing.
-func serveFrontend(frontend fs.FS) http.HandlerFunc {
+func serveFrontend(embedded fs.FS) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/")
 		if path == "" {
 			path = "index.html"
 		}
 
-		data, err := fs.ReadFile(frontend, path)
+		data, err := fs.ReadFile(embedded, path)
 		if err != nil {
 			// SPA fallback: serve index.html for client-side routing.
-			data, err = fs.ReadFile(frontend, "index.html")
+			data, err = fs.ReadFile(embedded, "index.html")
 			if err != nil {
 				http.NotFound(w, r)
 				return
 			}
+			// Reset path so the Content-Type is detected from index.html,
+			// not from the original request path.
+			path = "index.html"
 		}
 
 		ctype := mime.TypeByExtension(filepath.Ext(path))
