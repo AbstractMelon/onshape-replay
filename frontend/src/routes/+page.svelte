@@ -26,7 +26,7 @@
 
     <div class="flex flex-wrap items-center justify-center gap-3">
       <a
-        href="https://cad.onshape.com/appstore"
+        href="https://cad.onshape.com/appstore/apps/Rendering/6a4b1a514f7102ea7e1d840e"
         class="inline-flex items-center gap-2 rounded-sm bg-[#f2a93b] px-6 py-3 text-sm font-medium text-[#1a1102] transition hover:brightness-110"
       >
         <Download class="h-4 w-4" /> Install from Onshape Store

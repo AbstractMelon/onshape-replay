@@ -36,6 +36,7 @@ func main() {
 		log.Error("configuration error", "err", err)
 		os.Exit(1)
 	}
+	log.Info("oauth config loaded", "callback_url", cfg.OAuthCallbackURL, "client_id", cfg.OAuthClientID)
 
 	// Verify FFmpeg is available before starting.
 	encoder := ffmpeg.NewEncoder(cfg.FFmpegPath)
