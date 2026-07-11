@@ -1,6 +1,6 @@
 // Package auth handles per-user OAuth2 sessions with Onshape.
 // Sessions are stored in memory keyed by a random session ID stored in a
-// cookie. All cookies use SameSite=None + Secure so they work inside iframes.
+// cookie. Cookies use SameSite=None + Secure so they work inside iframes.
 package auth
 
 import (
@@ -95,27 +95,25 @@ func (s *Store) Delete(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:       cookieName,
-		Value:      "",
-		MaxAge:     -1,
-		Path:       "/",
-		HttpOnly:   true,
-		Secure:     true,
-		SameSite:   http.SameSiteNoneMode,
-		Partitioned: true,
+		Name:     cookieName,
+		Value:    "",
+		MaxAge:   -1,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
 	})
 }
 
 func (s *Store) setCookie(w http.ResponseWriter, id string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:       cookieName,
-		Value:      id,
-		MaxAge:     int(sessionTTL.Seconds()),
-		Path:       "/",
-		HttpOnly:   true,
-		Secure:     true,
-		SameSite:   http.SameSiteNoneMode,
-		Partitioned: true,
+		Name:     cookieName,
+		Value:    id,
+		MaxAge:   int(sessionTTL.Seconds()),
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
 	})
 }
 

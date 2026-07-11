@@ -155,20 +155,44 @@ func makeCancelHandler(svc Services) http.HandlerFunc {
 func makeManifestHandler(svc Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		jobID := chi.URLParam(r, "jobId")
-		job, ok := svc.Queue.Get(jobID)
-		if !ok {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
+
+		// Try the in-memory queue first.
+		if job, ok := svc.Queue.Get(jobID); ok {
+			paths := storage.Layout(svc.StorageRoot, job.DocumentID, job.ElementID, jobID)
+			manifest, err := storage.ReadManifest(paths.Manifest)
+			if err != nil {
+				// Manifest may not exist yet for in-progress jobs; return the in-memory state.
+				writeJSON(w, http.StatusOK, jobToResponse(job))
+				return
+			}
+			writeJSON(w, http.StatusOK, manifest)
 			return
 		}
-		paths := storage.Layout(svc.StorageRoot, job.DocumentID, job.ElementID, jobID)
-		manifest, err := storage.ReadManifest(paths.Manifest)
+
+		// Job not in queue (server restarted). Search disk for the manifest.
+		manifest, err := findManifest(svc.StorageRoot, jobID)
 		if err != nil {
-			// Manifest may not exist yet for in-progress jobs; return the in-memory state.
-			writeJSON(w, http.StatusOK, jobToResponse(job))
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
 			return
 		}
 		writeJSON(w, http.StatusOK, manifest)
 	}
+}
+
+// findManifest searches the storage tree for a completed job's manifest on disk.
+// Path layout: {storageRoot}/{documentId}/{elementId}/{jobId}/manifest.json
+func findManifest(storageRoot, jobID string) (*storage.Manifest, error) {
+	matches, err := filepath.Glob(filepath.Join(storageRoot, "*", "*", jobID, "manifest.json"))
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range matches {
+		manifest, err := storage.ReadManifest(m)
+		if err == nil {
+			return manifest, nil
+		}
+	}
+	return nil, fmt.Errorf("no manifest found for job %s", jobID)
 }
 
 // makePreviewHandler handles POST /jobs/preview.
@@ -207,17 +231,9 @@ func makeDownloadHandler(svc Services) http.HandlerFunc {
 		jobID := chi.URLParam(r, "jobId")
 		format := chi.URLParam(r, "format")
 
-		job, ok := svc.Queue.Get(jobID)
-		if !ok {
-			http.Error(w, "job not found", http.StatusNotFound)
-			return
-		}
-		if job.Status != render.StatusCompleted {
-			http.Error(w, "job not completed", http.StatusConflict)
-			return
-		}
+		docID, elemID := lookupJobIDs(svc, jobID)
 
-		paths := storage.Layout(svc.StorageRoot, job.DocumentID, job.ElementID, jobID)
+		paths := storage.Layout(svc.StorageRoot, docID, elemID, jobID)
 
 		var filePath string
 		var contentType string
@@ -250,4 +266,17 @@ func makeDownloadHandler(svc Services) http.HandlerFunc {
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(downloadName)))
 		http.ServeFile(w, r, filePath)
 	}
+}
+
+// lookupJobIDs returns (documentID, elementID) for a job, preferring the
+// in-memory queue and falling back to the disk manifest.
+func lookupJobIDs(svc Services, jobID string) (string, string) {
+	if job, ok := svc.Queue.Get(jobID); ok {
+		return job.DocumentID, job.ElementID
+	}
+	manifest, err := findManifest(svc.StorageRoot, jobID)
+	if err != nil {
+		return "", ""
+	}
+	return manifest.DocumentID, manifest.ElementID
 }
