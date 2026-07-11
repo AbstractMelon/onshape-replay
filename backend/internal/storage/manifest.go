@@ -72,6 +72,7 @@ type ExportConfig struct {
 	SkipConstruction bool     `json:"skipConstruction"`
 	GeometryOnly     bool     `json:"geometryOnly"`
 	BBoxMode         string   `json:"bboxMode"`
+	Zoom             float64  `json:"zoom"`
 }
 
 // OutputFile describes a generated output file.

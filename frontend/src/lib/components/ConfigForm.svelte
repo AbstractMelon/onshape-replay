@@ -47,7 +47,6 @@
 
   const resolutions = ['720p', '1080p', '4k'] as const;
   const cameraModes = [
-    { value: 'current', label: 'Current camera' },
     { value: 'isometric', label: 'Isometric' },
     { value: 'front', label: 'Front' },
     { value: 'top', label: 'Top' },
@@ -279,6 +278,24 @@
     </select>
     <p class="mt-1 text-xs text-gray-500">
       "Once" uses the completed model's bounding box for consistent framing. "Each" re-centers on the visible geometry per frame.
+    </p>
+  </div>
+
+  <div>
+    <label for="zoom" class="mb-1.5 block text-sm font-medium text-gray-700">
+      Zoom: {config.zoom.toFixed(1)}x
+    </label>
+    <input
+      id="zoom"
+      type="range"
+      min="0.1"
+      max="3"
+      step="0.1"
+      bind:value={config.zoom}
+      class="w-full cursor-pointer"
+    />
+    <p class="mt-1 text-xs text-gray-500">
+      1x fits the model exactly inside the viewport. Higher values zoom in, lower values zoom out.
     </p>
   </div>
 

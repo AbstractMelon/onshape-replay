@@ -122,6 +122,8 @@
         <div>{ec.frameRate} fps</div>
         <div class="text-gray-500">Camera mode</div>
         <div class="capitalize">{ec.viewMatrix ? `Named view: ${ec.cameraMode}` : ec.cameraMode}</div>
+        <div class="text-gray-500">Zoom</div>
+        <div>{ec.zoom.toFixed(1)}x</div>
         <div class="text-gray-500">Background</div>
         <div>{ec.transparent ? 'Transparent' : ec.bgColor}</div>
         {#if ec.skipSketches}<div class="text-gray-500">Skip sketches</div><div>Yes</div>{/if}

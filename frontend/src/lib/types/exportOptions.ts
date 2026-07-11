@@ -16,6 +16,7 @@ export interface ExportConfig {
   skipConstruction: boolean;
   geometryOnly: boolean;
   bboxMode: 'once' | 'each';
+  zoom: number;
 }
 
 export const DEFAULT_EXPORT_CONFIG: ExportConfig = {
@@ -35,5 +36,6 @@ export const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   skipSuppressed: true,
   skipConstruction: false,
   geometryOnly: false,
-  bboxMode: 'once'
+  bboxMode: 'once',
+  zoom: 1
 };

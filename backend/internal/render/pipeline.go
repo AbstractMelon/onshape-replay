@@ -160,9 +160,6 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		Transparent:     cfg.Transparent,
 	}
 	setViewMatrix(cfg.CameraMode, cfg.ViewMatrix, &viewCfg)
-	if viewCfg.ViewMatrix == "" {
-		viewCfg.ViewMatrix = "isometric"
-	}
 
 	var cachedPixelSize float64
 	if cfg.CameraViewport != "" {
@@ -213,7 +210,11 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 					log.Warn("per-frame bounding box failed, using fallback zoom", "err", err)
 					viewCfg.PixelSize = cachedPixelSize
 				} else {
-					viewCfg.PixelSize = computePixelSizeFromBBox(bbox, viewCfg, 0.75)
+					fill := cfg.Zoom
+					if fill <= 0 {
+						fill = 1
+					}
+					viewCfg.PixelSize = computePixelSizeFromBBox(bbox, viewCfg, fill)
 				}
 			default: // "once" or unset. Reuse the cached pixelSize from the completed model.
 				viewCfg.PixelSize = cachedPixelSize
@@ -474,10 +475,7 @@ func setViewMatrix(cameraMode, viewMatrix string, cfg *onshape.ShadedViewConfig)
 	case "top":
 		cfg.ViewMatrix = "top"
 	default:
-		// "current" camera: leave ViewMatrix empty to use whatever is active.
-		// In a temp workspace there is no stored camera, so the
-		// pipeline falls back to isometric after calling this function.
-		cfg.ViewMatrix = ""
+		cfg.ViewMatrix = "isometric"
 	}
 }
 
@@ -490,7 +488,11 @@ func computePixelSize(ctx context.Context, deps Dependencies, job *Job, viewCfg 
 	if err != nil {
 		return 0, err
 	}
-	return computePixelSizeFromBBox(bbox, viewCfg, 0.75), nil
+	fill := job.Config.Zoom
+	if fill <= 0 {
+		fill = 0.75
+	}
+	return computePixelSizeFromBBox(bbox, viewCfg, fill), nil
 }
 
 // pixelSizeFromCameraViewport computes the pixel size from a named view's

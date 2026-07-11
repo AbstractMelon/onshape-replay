@@ -26,9 +26,6 @@ func CapturePreview(ctx context.Context, client *onshape.Client, documentID, wvm
 		Transparent:     cfg.Transparent,
 	}
 	setViewMatrix(cfg.CameraMode, cfg.ViewMatrix, &viewCfg)
-	if viewCfg.ViewMatrix == "" {
-		viewCfg.ViewMatrix = "isometric"
-	}
 
 	if cfg.CameraViewport != "" {
 		viewCfg.PixelSize = pixelSizeFromCameraViewport(cfg.CameraViewport, viewCfg.OutputWidth, viewCfg.OutputHeight)
@@ -36,7 +33,11 @@ func CapturePreview(ctx context.Context, client *onshape.Client, documentID, wvm
 	if viewCfg.PixelSize <= 0 {
 		bbox, err := client.GetBoundingBoxes(ctx, documentID, wvmType, wvmID, elementID, false, false)
 		if err == nil && bbox != nil {
-			viewCfg.PixelSize = computePixelSizeFromBBox(bbox, viewCfg, 0.75)
+			fill := cfg.Zoom
+			if fill <= 0 {
+				fill = 1
+			}
+			viewCfg.PixelSize = computePixelSizeFromBBox(bbox, viewCfg, fill)
 		}
 	}
 
