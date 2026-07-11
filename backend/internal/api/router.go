@@ -71,6 +71,7 @@ func NewRouter(svc Services) http.Handler {
 	// Jobs (require authentication, no caching).
 	r.With(requireAuth(svc.Sessions, svc.Log), noCache).Route("/jobs", func(r chi.Router) {
 		r.Post("/", makeStartJobHandler(svc))
+		r.Post("/preview", makePreviewHandler(svc))
 		r.Get("/current", makeCurrentJobHandler(svc))
 
 		r.Route("/{jobId}", func(r chi.Router) {

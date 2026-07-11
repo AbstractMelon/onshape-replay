@@ -171,6 +171,36 @@ func makeManifestHandler(svc Services) http.HandlerFunc {
 	}
 }
 
+// makePreviewHandler handles POST /jobs/preview.
+// Captures a single frame with the given config and returns it as a PNG.
+func makePreviewHandler(svc Services) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req startJobRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		if req.DocumentID == "" || req.WorkspaceID == "" || req.ElementID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "documentId, workspaceId, and elementId are required"})
+			return
+		}
+
+		client := onshapeClientForReq(svc, r)
+
+		pngBytes, err := render.CapturePreview(r.Context(), client, req.DocumentID, "w", req.WorkspaceID, req.ElementID, req.Config)
+		if err != nil {
+			svc.Log.Error("preview capture failed", "err", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(pngBytes)))
+		w.WriteHeader(http.StatusOK)
+		w.Write(pngBytes)
+	}
+}
+
 // makeDownloadHandler handles GET /jobs/{jobId}/download/{format}.
 func makeDownloadHandler(svc Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

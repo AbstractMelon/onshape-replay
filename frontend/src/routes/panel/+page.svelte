@@ -8,6 +8,7 @@
     getCurrentJob,
     startJob,
     cancelJob,
+    previewCapture,
     AuthRequiredError
   } from '$lib/api/jobs';
   import { API_BASE } from '$lib/api/client';
@@ -337,7 +338,22 @@
     </div>
 
   {:else if state === 'configuring'}
-    <ConfigForm onSubmit={handleStartJob} {submitError} />
+    <ConfigForm
+      onSubmit={handleStartJob}
+      onPreview={async (cfg) => {
+        if (!context) return null;
+        try {
+          return await previewCapture(context, cfg);
+        } catch (err) {
+          if (err instanceof AuthRequiredError) {
+            redirectToLogin(window.location.href);
+            return null;
+          }
+          throw err;
+        }
+      }}
+      {submitError}
+    />
 
   {:else if state === 'inProgress'}
     <ProgressView

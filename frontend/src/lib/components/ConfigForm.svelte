@@ -1,17 +1,40 @@
 <script lang="ts">
-  import { Play } from 'lucide-svelte';
+  import { Play, Camera } from 'lucide-svelte';
   import type { ExportConfig } from '../types/exportOptions';
   import { DEFAULT_EXPORT_CONFIG } from '../types/exportOptions';
 
   let {
     initialConfig = DEFAULT_EXPORT_CONFIG,
+    onPreview,
     onSubmit,
     submitError
   }: {
     initialConfig?: ExportConfig;
+    onPreview?: (config: ExportConfig) => Promise<Blob | null>;
     onSubmit: (config: ExportConfig) => void;
     submitError: string | null;
   } = $props();
+
+  let previewUrl = $state<string | null>(null);
+  let previewLoading = $state(false);
+  let previewError = $state<string | null>(null);
+
+  async function handlePreview() {
+    if (!onPreview) return;
+    previewLoading = true;
+    previewError = null;
+    previewUrl = null;
+    try {
+      const blob = await onPreview(config);
+      if (blob) {
+        previewUrl = URL.createObjectURL(blob);
+      }
+    } catch (err) {
+      previewError = err instanceof Error ? err.message : String(err);
+    } finally {
+      previewLoading = false;
+    }
+  }
 
   // Intentionally captures initial prop value once; form maintains its own state
   let config = $state<ExportConfig>({ ...initialConfig });
@@ -299,11 +322,35 @@
     </label>
   </fieldset>
 
-  <button
-    type="submit"
-    class="flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-  >
-    <Play class="h-4 w-4" />
-    Start render
-  </button>
+  <div class="flex gap-2">
+    {#if onPreview}
+      <button
+        type="button"
+        onclick={handlePreview}
+        disabled={previewLoading}
+        class="flex flex-1 items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-60"
+      >
+        <Camera class="h-4 w-4" />
+        {previewLoading ? 'Capturing...' : 'Preview'}
+      </button>
+    {/if}
+    <button
+      type="submit"
+      class="flex flex-1 items-center justify-center gap-2 rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+    >
+      <Play class="h-4 w-4" />
+      Start render
+    </button>
+  </div>
+
+  {#if previewUrl}
+    <div class="rounded-md border border-gray-200 overflow-hidden">
+      <img src={previewUrl} alt="Preview" class="w-full h-auto block" />
+    </div>
+  {/if}
+  {#if previewError}
+    <div class="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+      {previewError}
+    </div>
+  {/if}
 </form>

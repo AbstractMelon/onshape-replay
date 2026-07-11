@@ -485,25 +485,29 @@ func computePixelSize(ctx context.Context, deps Dependencies, job *Job, viewCfg 
 }
 
 // isometricPixelSize computes the pixelSize needed to frame the bounding box
-// within the viewport under Onshape's isometric view projection. The fill
-// parameter controls what fraction of the viewport the model should occupy
-// (e.g. 0.75 = 75% fill).
+// within the viewport under Onshape's isometric view projection. Onshape uses
+// a standard isometric orthographic camera (view from (1,1,1), Z-up):
+//
+//	x_screen = (x - y) / √2
+//	y_screen = (x + y - 2z) / √6
+//
+// The fill parameter controls what fraction of the viewport the model should
+// occupy (e.g. 0.75 = 75% fill).
 func isometricPixelSize(bbox *onshape.BoundingBox, width, height int, fill float64) float64 {
-	cos30 := math.Cos(math.Pi / 6)
-	sin30 := math.Sin(math.Pi / 6)
+	invSqrt2 := 1.0 / math.Sqrt2
+	invSqrt6 := 1.0 / math.Sqrt(6)
 
-	// Project the 8 corners of the bbox through an isometric projection:
-	//   x_screen = (x - z) * cos(30°)
-	//   y_screen = (x + z) * sin(30°) + y
+	// Project the 8 corners of the bbox through Onshape's isometric
+	// view projection. All three axes are equally foreshortened.
 	corners := [8][2]float64{
-		{(bbox.LowX - bbox.LowZ) * cos30, (bbox.LowX+bbox.LowZ)*sin30 + bbox.LowY},
-		{(bbox.HighX - bbox.LowZ) * cos30, (bbox.HighX+bbox.LowZ)*sin30 + bbox.LowY},
-		{(bbox.LowX - bbox.HighZ) * cos30, (bbox.LowX+bbox.HighZ)*sin30 + bbox.LowY},
-		{(bbox.HighX - bbox.HighZ) * cos30, (bbox.HighX+bbox.HighZ)*sin30 + bbox.LowY},
-		{(bbox.LowX - bbox.LowZ) * cos30, (bbox.LowX+bbox.LowZ)*sin30 + bbox.HighY},
-		{(bbox.HighX - bbox.LowZ) * cos30, (bbox.HighX+bbox.LowZ)*sin30 + bbox.HighY},
-		{(bbox.LowX - bbox.HighZ) * cos30, (bbox.LowX+bbox.HighZ)*sin30 + bbox.HighY},
-		{(bbox.HighX - bbox.HighZ) * cos30, (bbox.HighX+bbox.HighZ)*sin30 + bbox.HighY},
+		{(bbox.LowX - bbox.LowY) * invSqrt2, (bbox.LowX + bbox.LowY - 2*bbox.LowZ) * invSqrt6},
+		{(bbox.HighX - bbox.LowY) * invSqrt2, (bbox.HighX + bbox.LowY - 2*bbox.LowZ) * invSqrt6},
+		{(bbox.LowX - bbox.HighY) * invSqrt2, (bbox.LowX + bbox.HighY - 2*bbox.LowZ) * invSqrt6},
+		{(bbox.HighX - bbox.HighY) * invSqrt2, (bbox.HighX + bbox.HighY - 2*bbox.LowZ) * invSqrt6},
+		{(bbox.LowX - bbox.LowY) * invSqrt2, (bbox.LowX + bbox.LowY - 2*bbox.HighZ) * invSqrt6},
+		{(bbox.HighX - bbox.LowY) * invSqrt2, (bbox.HighX + bbox.LowY - 2*bbox.HighZ) * invSqrt6},
+		{(bbox.LowX - bbox.HighY) * invSqrt2, (bbox.LowX + bbox.HighY - 2*bbox.HighZ) * invSqrt6},
+		{(bbox.HighX - bbox.HighY) * invSqrt2, (bbox.HighX + bbox.HighY - 2*bbox.HighZ) * invSqrt6},
 	}
 
 	minX, maxX := corners[0][0], corners[0][0]

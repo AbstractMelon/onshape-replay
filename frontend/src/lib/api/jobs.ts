@@ -94,3 +94,25 @@ export async function getJobById(jobId: string): Promise<JobResponse> {
   if (res.status === 404) throw new Error('job not found');
   throw new Error(`Failed to load job (${res.status})`);
 }
+
+export async function previewCapture(
+  ctx: OnshapeContext,
+  config: ExportConfig
+): Promise<Blob> {
+  const res = await apiFetch('/jobs/preview', {
+    method: 'POST',
+    body: JSON.stringify({
+      documentId: ctx.documentId,
+      workspaceId: ctx.workspaceId,
+      elementId: ctx.elementId,
+      config
+    })
+  });
+
+  if (res.status === 401) throw new AuthRequiredError();
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `Preview failed (${res.status})`);
+  }
+  return res.blob();
+}
