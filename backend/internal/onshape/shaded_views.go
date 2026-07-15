@@ -19,8 +19,11 @@ type ShadedViewConfig struct {
 	ShowAllParts bool
 	// UseAntiAliasing enables SSAA.
 	UseAntiAliasing bool
-	// ViewMatrix is a 4x4 column-major transformation matrix as a
-	// comma-separated string. Leave empty to use the current camera.
+	// ViewMatrix is a 12-number, row-major 3x4 model-transform matrix as a
+	// comma-separated string (first 3 columns = rotation, 4th column =
+	// origin translation in meters). Leave empty to use the current camera.
+	// The render pipeline always sets this to a matrix re-centered on the
+	// model's bounding-box center so the part is framed, not the origin.
 	ViewMatrix string
 	// Transparent requests a transparent background when the output supports it.
 	// When false, the pipeline composites the transparent PNG onto a solid

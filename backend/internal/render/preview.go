@@ -24,20 +24,36 @@ func CapturePreview(ctx context.Context, client *onshape.Client, documentID, wvm
 		UseAntiAliasing: true,
 		Transparent:     cfg.Transparent,
 	}
-	setViewMatrix(cfg.CameraMode, cfg.ViewMatrix, &viewCfg)
 
-	if cfg.CameraViewport != "" {
-		viewCfg.PixelSize = pixelSizeFromCameraViewport(cfg.CameraViewport, viewCfg.OutputWidth, viewCfg.OutputHeight)
+	// Orient the view and re-center it on the model's bounding-box center so
+	// the part is framed instead of floating above the world origin.
+	R := orientationFor(cfg.CameraMode, cfg.ViewMatrix)
+	if cfg.ViewMatrix != "" {
+		viewCfg.ViewMatrix = convertViewMatrix(cfg.ViewMatrix)
 	}
-	if viewCfg.PixelSize <= 0 {
-		bbox, err := client.GetBoundingBoxes(ctx, documentID, wvmType, wvmID, elementID, false, false)
-		if err == nil && bbox != nil {
+
+	var cachedPixelSize float64
+	if cfg.CameraViewport != "" {
+		cachedPixelSize = pixelSizeFromCameraViewport(cfg.CameraViewport, viewCfg.OutputWidth, viewCfg.OutputHeight)
+	}
+	bbox, err := client.GetBoundingBoxes(ctx, documentID, wvmType, wvmID, elementID, false, false)
+	if err == nil && bbox != nil {
+		center := [3]float64{
+			(bbox.LowX + bbox.HighX) / 2,
+			(bbox.LowY + bbox.HighY) / 2,
+			(bbox.LowZ + bbox.HighZ) / 2,
+		}
+		viewCfg.ViewMatrix = centeredViewMatrix(R, center)
+		if cachedPixelSize <= 0 {
 			fill := cfg.Zoom
 			if fill <= 0 {
 				fill = 1
 			}
-			viewCfg.PixelSize = computePixelSizeFromBBox(bbox, viewCfg, fill)
+			cachedPixelSize = computePixelSizeFromBBox(bbox, viewCfg, fill, R)
 		}
+	}
+	if cachedPixelSize > 0 {
+		viewCfg.PixelSize = cachedPixelSize
 	}
 
 	pngBytes, err := client.GetShadedView(ctx, documentID, wvmType, wvmID, elementID, viewCfg)

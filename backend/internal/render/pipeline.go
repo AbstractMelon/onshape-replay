@@ -159,7 +159,19 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		UseAntiAliasing: true,
 		Transparent:     cfg.Transparent,
 	}
-	setViewMatrix(cfg.CameraMode, cfg.ViewMatrix, &viewCfg)
+
+	// Orient the view using the requested camera mode (or the supplied named
+	// view matrix) and re-center it on the model's bounding-box center so the
+	// part is framed instead of floating above the world origin.
+	R := orientationFor(cfg.CameraMode, cfg.ViewMatrix)
+	if cfg.ViewMatrix != "" {
+		viewCfg.ViewMatrix = convertViewMatrix(cfg.ViewMatrix)
+	}
+
+	bbox, bboxErr := deps.Onshape.GetBoundingBoxes(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, false, false)
+	if bboxErr != nil || bbox == nil {
+		log.Warn("failed to get bounding box; view may be off-center", "err", bboxErr)
+	}
 
 	var cachedPixelSize float64
 	if cfg.CameraViewport != "" {
@@ -167,20 +179,29 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		if cachedPixelSize > 0 {
 			log.Info("computed pixel size from named view cameraViewport",
 				"pixelSize", cachedPixelSize, "viewport", cfg.CameraViewport)
-			viewCfg.PixelSize = cachedPixelSize
 		}
 	}
-	if cachedPixelSize <= 0 {
-		var bboxErr error
-		cachedPixelSize, bboxErr = computePixelSize(ctx, deps, job, viewCfg)
-		if bboxErr != nil {
-			log.Warn("failed to get bounding box from completed model", "err", bboxErr)
+	if bbox != nil {
+		center := [3]float64{
+			(bbox.LowX + bbox.HighX) / 2,
+			(bbox.LowY + bbox.HighY) / 2,
+			(bbox.LowZ + bbox.HighZ) / 2,
 		}
-		if cachedPixelSize > 0 {
-			log.Info("computed pixel size from bounding box",
-				"pixelSize", cachedPixelSize)
-			viewCfg.PixelSize = cachedPixelSize
+		viewCfg.ViewMatrix = centeredViewMatrix(R, center)
+		if cachedPixelSize <= 0 {
+			fill := cfg.Zoom
+			if fill <= 0 {
+				fill = 0.75
+			}
+			cachedPixelSize = computePixelSizeFromBBox(bbox, viewCfg, fill, R)
+			if cachedPixelSize > 0 {
+				log.Info("computed pixel size from bounding box",
+					"pixelSize", cachedPixelSize)
+			}
 		}
+	}
+	if cachedPixelSize > 0 {
+		viewCfg.PixelSize = cachedPixelSize
 	}
 	// Capture loop.
 	for stepIdx, step := range steps {
@@ -214,7 +235,13 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 					if fill <= 0 {
 						fill = 1
 					}
-					viewCfg.PixelSize = computePixelSizeFromBBox(bbox, viewCfg, fill)
+					viewCfg.PixelSize = computePixelSizeFromBBox(bbox, viewCfg, fill, R)
+				fcenter := [3]float64{
+					(bbox.LowX + bbox.HighX) / 2,
+					(bbox.LowY + bbox.HighY) / 2,
+					(bbox.LowZ + bbox.HighZ) / 2,
+				}
+				viewCfg.ViewMatrix = centeredViewMatrix(R, fcenter)
 				}
 			default: // "once" or unset. Reuse the cached pixelSize from the completed model.
 				viewCfg.PixelSize = cachedPixelSize
@@ -448,43 +475,6 @@ func isGeometryFeature(featureType string) bool {
 	return false
 }
 
-// Applies a standard camera orientation based on cameraMode.
-// Onshape's shadedViews API accepts named views ("isometric", "front", "top"),
-// a 16-value column-major transformation matrix, or a named view reference.
-// If viewMatrix is non-empty it takes precedence over cameraMode.
-func setViewMatrix(cameraMode, viewMatrix string, cfg *onshape.ShadedViewConfig) {
-	if viewMatrix != "" {
-		cfg.ViewMatrix = viewMatrix
-		return
-	}
-	switch strings.ToLower(cameraMode) {
-	case "isometric":
-		cfg.ViewMatrix = "isometric"
-	case "front":
-		cfg.ViewMatrix = "front"
-	case "top":
-		cfg.ViewMatrix = "top"
-	default:
-		cfg.ViewMatrix = "isometric"
-	}
-}
-
-// Fetches the bounding box of the completed model (at the
-// original rollback state) and returns the pixel size that frames it at 75%
-// fill. Returns 0 if the API call fails, which signals callers to use a
-// fallback (e.g. Onshape's default zoom).
-func computePixelSize(ctx context.Context, deps Dependencies, job *Job, viewCfg onshape.ShadedViewConfig) (float64, error) {
-	bbox, err := deps.Onshape.GetBoundingBoxes(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, false, false)
-	if err != nil {
-		return 0, err
-	}
-	fill := job.Config.Zoom
-	if fill <= 0 {
-		fill = 0.75
-	}
-	return computePixelSizeFromBBox(bbox, viewCfg, fill), nil
-}
-
 // Computes the pixel size from a named view's
 // cameraViewport values. The viewport is [left, right, bottom, top] in
 // model-space meters. This produces exact framing that matches the named
@@ -516,86 +506,187 @@ func pixelSizeFromCameraViewport(cameraViewport string, outputWidth, outputHeigh
 	return py
 }
 
-// Computes the pixel size that frames the given
-// bounding box within the viewport at the specified fill fraction. For
-// standard views (isometric, front, top) it uses the exact isometric
-// projection formula. For named/arbitrary view matrices it uses the max
-// axis-aligned extent as a rough approximation, which is good enough to
-// make the model visible even when the exact projection is unknown.
-func computePixelSizeFromBBox(bbox *onshape.BoundingBox, viewCfg onshape.ShadedViewConfig, fill float64) float64 {
-	if viewCfg.ViewMatrix == "isometric" || viewCfg.ViewMatrix == "front" || viewCfg.ViewMatrix == "top" {
-		return isometricPixelSize(bbox, viewCfg.OutputWidth, viewCfg.OutputHeight, fill)
-	}
+// mat3 is a row-major 3x3 rotation (model -> view space).
+type mat3 [3][3]float64
 
-	dx := bbox.HighX - bbox.LowX
-	dy := bbox.HighY - bbox.LowY
-	dz := bbox.HighZ - bbox.LowZ
-	modelSize := math.Max(dx, math.Max(dy, dz))
-	if modelSize <= 0 {
-		return 0
+func rotX(a float64) mat3 {
+	c, s := math.Cos(a), math.Sin(a)
+	return mat3{
+		{1, 0, 0},
+		{0, c, -s},
+		{0, s, c},
 	}
-
-	viewportSize := float64(viewCfg.OutputWidth)
-	if viewCfg.OutputHeight > viewCfg.OutputWidth {
-		viewportSize = float64(viewCfg.OutputHeight)
-	}
-
-	return modelSize / (viewportSize * fill)
 }
 
-// Computes the pixelSize needed to frame the bounding box
-// within the viewport under Onshape's isometric view projection. Onshape uses
-// a standard isometric orthographic camera (view from (1,1,1), Z-up):
+// Standard Onshape model->view orientations. Onshape's shadedviews viewMatrix
+// is a 12-number, row-major 3x4 matrix applied as a MODEL transform:
+// view = R*model + t. The first three columns are the (orthonormal, positive
+// determinant) rotation R; the 4th column t translates the model origin in
+// meters. The image center is view coordinate (0,0), so to center the model we
+// set t = -R*center.
 //
-//	x_screen = (x - y) / √2
-//	y_screen = (x + y - 2z) / √6
-//
-// The fill parameter controls what fraction of the viewport the model should
-// occupy (e.g. 0.75 = 75% fill).
-func isometricPixelSize(bbox *onshape.BoundingBox, width, height int, fill float64) float64 {
-	invSqrt2 := 1.0 / math.Sqrt2
-	invSqrt6 := 1.0 / math.Sqrt(6)
-
-	// Project the 8 corners of the bbox through Onshape's isometric
-	// View projection. All three axes are equally foreshortened.
-	corners := [8][2]float64{
-		{(bbox.LowX - bbox.LowY) * invSqrt2, (bbox.LowX + bbox.LowY - 2*bbox.LowZ) * invSqrt6},
-		{(bbox.HighX - bbox.LowY) * invSqrt2, (bbox.HighX + bbox.LowY - 2*bbox.LowZ) * invSqrt6},
-		{(bbox.LowX - bbox.HighY) * invSqrt2, (bbox.LowX + bbox.HighY - 2*bbox.LowZ) * invSqrt6},
-		{(bbox.HighX - bbox.HighY) * invSqrt2, (bbox.HighX + bbox.HighY - 2*bbox.LowZ) * invSqrt6},
-		{(bbox.LowX - bbox.LowY) * invSqrt2, (bbox.LowX + bbox.LowY - 2*bbox.HighZ) * invSqrt6},
-		{(bbox.HighX - bbox.LowY) * invSqrt2, (bbox.HighX + bbox.LowY - 2*bbox.HighZ) * invSqrt6},
-		{(bbox.LowX - bbox.HighY) * invSqrt2, (bbox.LowX + bbox.HighY - 2*bbox.HighZ) * invSqrt6},
-		{(bbox.HighX - bbox.HighY) * invSqrt2, (bbox.HighX + bbox.HighY - 2*bbox.HighZ) * invSqrt6},
+//   - viewTop:   look straight down -Z (default on-screen orientation, X right,
+//                Y up).
+//   - viewFront: look along -Y (model X right, model Z up).
+//   - viewIso:   standard engineering isometric. Onshape projects the model
+//                axes to screen as +X -> down-right, +Y -> up-right, +Z -> up,
+//                which is what this matrix reproduces.
+var (
+	viewTop = mat3{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}
+	viewFront = rotX(-math.Pi / 2)
+	viewIso = mat3{
+		{1 / math.Sqrt2, 1 / math.Sqrt2, 0},
+		{-1 / math.Sqrt(6), 1 / math.Sqrt(6), math.Sqrt(2.0 / 3.0)},
+		{1 / math.Sqrt(3), -1 / math.Sqrt(3), 1 / math.Sqrt(3)},
 	}
+)
 
-	minX, maxX := corners[0][0], corners[0][0]
-	minY, maxY := corners[0][1], corners[0][1]
-	for _, c := range corners[1:] {
-		if c[0] < minX {
-			minX = c[0]
+// orientationFor returns the model->view rotation for the camera config. A
+// supplied viewMatrix is parsed as the row-major matrix the frontend sends and
+// its 3x3 rotation is extracted (the translation is recomputed when centering).
+func orientationFor(cameraMode, viewMatrix string) mat3 {
+	if viewMatrix != "" {
+		return rotationFromMatrixString(viewMatrix)
+	}
+	switch strings.ToLower(cameraMode) {
+	case "front":
+		return viewFront
+	case "top":
+		return viewTop
+	default:
+		return viewIso
+	}
+}
+
+// rotationFromMatrixString parses a comma-separated number list as a row-major
+// 4x4 (or 3x4) matrix and returns its upper-left 3x3 rotation.
+func rotationFromMatrixString(s string) mat3 {
+	nums := parseMatrixFloats(s)
+	var m mat3
+	get := func(r, c int) float64 {
+		idx := r*4 + c
+		if idx < len(nums) {
+			return nums[idx]
 		}
-		if c[0] > maxX {
-			maxX = c[0]
-		}
-		if c[1] < minY {
-			minY = c[1]
-		}
-		if c[1] > maxY {
-			maxY = c[1]
+		return 0
+	}
+	for r := 0; r < 3; r++ {
+		for c := 0; c < 3; c++ {
+			m[r][c] = get(r, c)
 		}
 	}
+	return m
+}
 
-	screenW := maxX - minX
-	screenH := maxY - minY
+// convertViewMatrix normalizes the supplied row-major matrix (as sent by the
+// frontend) into the 12-number, row-major 3x4 form Onshape expects, preserving
+// its original translation.
+func convertViewMatrix(s string) string {
+	nums := parseMatrixFloats(s)
+	get := func(r, c int) float64 {
+		idx := r*4 + c
+		if idx < len(nums) {
+			return nums[idx]
+		}
+		return 0
+	}
+	var R mat3
+	for r := 0; r < 3; r++ {
+		for c := 0; c < 3; c++ {
+			R[r][c] = get(r, c)
+		}
+	}
+	t := [3]float64{get(0, 3), get(1, 3), get(2, 3)}
+	return rowMajor12(R, t)
+}
 
-	// If the bbox has no extent on screen, fall back to auto-fit.
+// centeredViewMatrix builds the 12-number, row-major 3x4 view matrix that
+// orients the model by R and projects the model's bounding-box center onto the
+// image center. Onshape's shadedviews centers the rendered image on the
+// projected MODEL ORIGIN, not on the model -- so without this re-centering the
+// model floats above/below the origin (almost always "too high", since parts
+// are typically modelled above the part-studio origin).
+func centeredViewMatrix(R mat3, center [3]float64) string {
+	t := [3]float64{
+		-(R[0][0]*center[0] + R[0][1]*center[1] + R[0][2]*center[2]),
+		-(R[1][0]*center[0] + R[1][1]*center[1] + R[1][2]*center[2]),
+		-(R[2][0]*center[0] + R[2][1]*center[1] + R[2][2]*center[2]),
+	}
+	return rowMajor12(R, t)
+}
+
+// rowMajor12 lays a rotation R and translation t out as the 12-number,
+// row-major 3x4 string Onshape's shadedviews viewMatrix expects.
+func rowMajor12(R mat3, t [3]float64) string {
+	v := [12]float64{
+		R[0][0], R[0][1], R[0][2], t[0],
+		R[1][0], R[1][1], R[1][2], t[1],
+		R[2][0], R[2][1], R[2][2], t[2],
+	}
+	parts := make([]string, 12)
+	for i, x := range v {
+		parts[i] = strconv.FormatFloat(x, 'g', -1, 64)
+	}
+	return strings.Join(parts, ",")
+}
+
+func parseMatrixFloats(s string) []float64 {
+	parts := strings.Split(s, ",")
+	nums := make([]float64, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if v, err := strconv.ParseFloat(p, 64); err == nil {
+			nums = append(nums, v)
+		}
+	}
+	return nums
+}
+
+// projectionExtent projects the 8 corners of the bbox through R and returns the
+// on-screen width/height of the model in model-space units.
+func projectionExtent(R mat3, bbox *onshape.BoundingBox) (float64, float64) {
+	xs := [2]float64{bbox.LowX, bbox.HighX}
+	ys := [2]float64{bbox.LowY, bbox.HighY}
+	zs := [2]float64{bbox.LowZ, bbox.HighZ}
+	minX, maxX := math.MaxFloat64, -math.MaxFloat64
+	minY, maxY := math.MaxFloat64, -math.MaxFloat64
+	for _, x := range xs {
+		for _, y := range ys {
+			for _, z := range zs {
+				sx := R[0][0]*x + R[0][1]*y + R[0][2]*z
+				sy := R[1][0]*x + R[1][1]*y + R[1][2]*z
+				if sx < minX {
+					minX = sx
+				}
+				if sx > maxX {
+					maxX = sx
+				}
+				if sy < minY {
+					minY = sy
+				}
+				if sy > maxY {
+					maxY = sy
+				}
+			}
+		}
+	}
+	return maxX - minX, maxY - minY
+}
+
+// Computes the pixel size that frames the given bounding box within the
+// viewport at the specified fill fraction, using the chosen view orientation.
+// The pixelSize only controls zoom; centering is handled separately by
+// centeredViewMatrix.
+func computePixelSizeFromBBox(bbox *onshape.BoundingBox, viewCfg onshape.ShadedViewConfig, fill float64, R mat3) float64 {
+	screenW, screenH := projectionExtent(R, bbox)
 	if screenW <= 0 || screenH <= 0 {
 		return 0
 	}
-
-	px := screenW / (float64(width) * fill)
-	py := screenH / (float64(height) * fill)
+	px := screenW / (float64(viewCfg.OutputWidth) * fill)
+	py := screenH / (float64(viewCfg.OutputHeight) * fill)
 	if px > py {
 		return px
 	}
