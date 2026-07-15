@@ -37,5 +37,5 @@ export const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   skipConstruction: false,
   geometryOnly: false,
   bboxMode: 'once',
-  zoom: 1
+  zoom: 0.85
 };
