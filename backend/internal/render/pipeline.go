@@ -360,42 +360,37 @@ func applyRollback(ctx context.Context, deps Dependencies, job *Job, index int, 
 		return err
 	}
 
-	if err := trySetRollback(ctx, deps, job, index); err == nil {
-		goto wait
-	}
-
-	// The -1 sentinel is an alias for "end of the feature list" (show all).
-	// It always succeeds when the exact index is the max valid value.
-	if err := trySetRollback(ctx, deps, job, -1); err == nil {
-		log.Warn("rollback set to -1 (end of feature list)", "desired", index)
-		goto wait
-	}
-
-	// Onshape rejects rollback positions inside a folder group.
-	// Scan backward to find the nearest valid boundary.
+	candidates := []int{index, -1}
 	for offset := 1; offset <= 5; offset++ {
 		if candidate := index - offset; candidate >= 0 {
-			if err := trySetRollback(ctx, deps, job, candidate); err == nil {
-				log.Warn("rollback set to index-offset", "desired", index, "actual", candidate, "offset", offset)
-				goto wait
-			}
+			candidates = append(candidates, candidate)
 		}
 	}
 
-	return fmt.Errorf("set rollback to %d: no valid position found", index)
-
-wait:
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(200 * time.Millisecond):
+	for _, candidate := range candidates {
+		if err := trySetRollback(ctx, deps, job, candidate); err != nil {
+			continue
+		}
+		switch {
+		case candidate == -1:
+			log.Warn("rollback set to -1 (end of feature list)", "desired", index)
+		case candidate != index:
+			log.Warn("rollback set to index-offset", "desired", index, "actual", candidate, "offset", index-candidate)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+		return nil
 	}
-	return nil
+
+	return fmt.Errorf("set rollback to %d: no valid position found", index)
 }
 
 // Calls SetRollback and ignores errors only for invalid indices.
 func trySetRollback(ctx context.Context, deps Dependencies, job *Job, index int) error {
-	if index < 0 {
+	if index < -1 {
 		return fmt.Errorf("invalid index %d", index)
 	}
 	return deps.Onshape.SetRollback(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, index)

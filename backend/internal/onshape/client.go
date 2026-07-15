@@ -59,65 +59,6 @@ func (c *Client) postJSON(ctx context.Context, path string, body any, dst any) e
 	return c.do(ctx, http.MethodPost, path, nil, strings.NewReader(string(b)), dst)
 }
 
-// Performs an authenticated GET and returns the raw response body bytes.
-func (c *Client) getRaw(ctx context.Context, path string, query url.Values) ([]byte, string, error) {
-	u := baseURL + path
-	if len(query) > 0 {
-		u += "?" + query.Encode()
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.getAccessToken())
-	req.Header.Set("Accept", "application/json;charset=UTF-8;qs=0.09")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusUnauthorized && c.tokenRefresher != nil {
-		_, rErr := c.tokenRefresher(ctx)
-		if rErr != nil {
-			return nil, "", fmt.Errorf("token refresh: %w", rErr)
-		}
-		c.log.Debug("refreshed token in getRaw")
-
-		req2, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-		if err != nil {
-			return nil, "", fmt.Errorf("rebuild request after refresh: %w", err)
-		}
-		req2.Header.Set("Authorization", "Bearer "+c.getAccessToken())
-		req2.Header.Set("Accept", "application/json;charset=UTF-8;qs=0.09")
-		resp2, err2 := c.httpClient.Do(req2)
-		if err2 != nil {
-			return nil, "", err2
-		}
-		defer resp2.Body.Close()
-		if resp2.StatusCode >= 400 {
-			b, readErr := io.ReadAll(resp2.Body)
-			if readErr != nil {
-				return nil, "", fmt.Errorf("Onshape API %s: %d (read body: %v)", path, resp2.StatusCode, readErr)
-			}
-			return nil, "", fmt.Errorf("Onshape API %s: %d %s", path, resp2.StatusCode, string(b))
-		}
-		raw, e := io.ReadAll(resp2.Body)
-		return raw, resp2.Header.Get("Content-Type"), e
-	}
-
-	if resp.StatusCode >= 400 {
-		b, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			return nil, "", fmt.Errorf("Onshape API %s: %d (read body: %v)", path, resp.StatusCode, readErr)
-		}
-		return nil, "", fmt.Errorf("Onshape API %s: %d %s", path, resp.StatusCode, string(b))
-	}
-	raw, e := io.ReadAll(resp.Body)
-	return raw, resp.Header.Get("Content-Type"), e
-}
-
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, body io.Reader, dst any) error {
 	u := baseURL + path
 	if len(query) > 0 {

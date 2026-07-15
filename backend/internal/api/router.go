@@ -53,23 +53,8 @@ func NewRouter(svc Services) http.Handler {
 	r.Get("/auth/logout", svc.OAuthHandler.LogoutHandler)
 
 	// Auth status check endpoint (called by the frontend on panel load).
-	r.Get("/auth/status", func(w http.ResponseWriter, r *http.Request) {
-		_, err := r.Cookie(authCookieName)
-		noCookie := err != nil
-
-		sess, ok := svc.Sessions.Get(r)
-		if !ok || !auth.Authenticated(sess) {
-			switch {
-			case noCookie:
-				svc.Log.Debug("auth status: no session cookie", "remote", r.RemoteAddr)
-			case !ok:
-				svc.Log.Debug("auth status: session not found or expired", "remote", r.RemoteAddr)
-			default:
-				svc.Log.Debug("auth status: session has no access token", "remote", r.RemoteAddr)
-			}
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"status": "unauthenticated"})
-			return
-		}
+	// Delegates auth to requireAuth middleware to avoid duplicating session checks.
+	r.With(requireAuth(svc.Sessions, svc.Log)).Get("/auth/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "authenticated"})
 	})
 

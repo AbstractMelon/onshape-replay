@@ -269,38 +269,7 @@
       return;
     }
 
-    try {
-      const authed = await checkAuthStatus();
-      if (!authed) {
-        redirectToLogin(window.location.href);
-        return;
-      }
-
-      const job = await getCurrentJob(context);
-      if (!job) {
-        state = 'configuring';
-        return;
-      }
-
-      currentJob = job;
-      jobStore.setJob(job);
-
-      if (job.status === 'pending' || job.status === 'running') {
-        state = 'inProgress';
-        openEventSource(job.id);
-      } else if (job.status === 'completed') {
-        state = 'completed';
-      } else {
-        state = 'failedOrCancelled';
-      }
-    } catch (err) {
-      if (err instanceof AuthRequiredError) {
-        redirectToLogin(window.location.href);
-        return;
-      }
-      state = 'error';
-      errorMessage = err instanceof Error ? err.message : String(err);
-    }
+    return proceedWithFullContext(context);
   }
 
   onMount(() => {

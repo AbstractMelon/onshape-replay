@@ -30,7 +30,7 @@ export const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   holdFirst: 0,
   holdLast: 0,
   fileNaming: 'frame_{index}',
-  formats: ['mp4', 'zip'],
+  formats: ['mp4'],
   featureLabel: false,
   skipSketches: true,
   skipSuppressed: true,
