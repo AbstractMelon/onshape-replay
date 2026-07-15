@@ -10,20 +10,12 @@
     manifest: JobManifest | JobResponse;
   } = $props();
 
-  let selectedFormat = $state<string>('mp4');
-
   const isFullManifest = $derived('exportConfig' in manifest && 'features' in manifest);
   const fullManifest = $derived(isFullManifest ? (manifest as JobManifest) : null);
   const jobId = $derived(manifest.jobId || (manifest as JobResponse).id);
 
   const outputs = $derived(manifest.outputs ?? []);
-
-  const previewOutput = $derived(
-    outputs.find((o) => o.format === selectedFormat) ?? outputs[0]
-  );
-
-  const hasVideo = $derived(outputs.some((o) => o.format === 'mp4'));
-  const hasGif = $derived(outputs.some((o) => o.format === 'gif'));
+  const previewOutput = $derived(outputs[0]);
 
   function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
@@ -64,26 +56,6 @@
       {/if}
     </div>
 
-    <!-- format switcher -->
-    {#if hasVideo || hasGif}
-      <div class="flex gap-2">
-        {#each outputs.filter((o) => o.format === 'mp4' || o.format === 'gif') as out}
-          <button
-            onclick={() => (selectedFormat = out.format)}
-            class="flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition-colors {selectedFormat === out.format
-              ? 'border-blue-300 bg-blue-50 text-blue-700'
-              : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50'}"
-          >
-            {#if out.format === 'mp4'}
-              <Video class="h-4 w-4" />
-            {:else}
-              <Image class="h-4 w-4" />
-            {/if}
-            {out.format.toUpperCase()}
-          </button>
-        {/each}
-      </div>
-    {/if}
   {/if}
 
   <!-- download buttons -->

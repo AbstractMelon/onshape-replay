@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Download, ExternalLink, Play, CheckCircle, XCircle, AlertCircle, Clock } from 'lucide-svelte';
+  import { Download, ExternalLink, FileArchive, CheckCircle, XCircle, AlertCircle } from 'lucide-svelte';
   import { API_BASE } from '../api/client';
   import type { JobResponse, JobStatus } from '../types/job';
   import ConfirmDialog from './ConfirmDialog.svelte';
@@ -13,17 +13,12 @@
   } = $props();
 
   let showConfirm = $state(false);
-  let thumbnailError = $state(false);
 
   const isFailed = $derived(job.status === 'failed');
   const isCancelled = $derived(job.status === 'cancelled');
   const isCompleted = $derived(job.status === 'completed');
 
-  const thumbnailUrl = $derived(
-    !isFailed && !isCancelled
-      ? `${API_BASE}/storage/${job.documentId}/${job.elementId}/${job.id}/frames/frame_0001.png`
-      : null
-  );
+  const previewOutput = $derived(job.outputs?.[0]);
 
   function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
@@ -34,17 +29,32 @@
 
 <div class="space-y-4">
   {#if isCompleted}
-    <!-- successful result -->
-    {#if thumbnailUrl && !thumbnailError}
-      <img
-        src={thumbnailUrl}
-        alt="Render preview"
-        class="w-full rounded-lg border border-gray-200 object-cover"
-        onerror={() => (thumbnailError = true)}
-      />
-    {:else}
-      <div class="flex aspect-video items-center justify-center rounded-lg bg-gray-100">
-        <Play class="h-10 w-10 text-gray-400" />
+    <div class="flex items-center gap-2 text-sm font-semibold text-gray-700">
+      <CheckCircle class="h-4 w-4 text-green-500" />
+      Render complete
+    </div>
+    {#if previewOutput}
+      <div class="overflow-hidden rounded-xl border border-gray-200 bg-black">
+        {#if previewOutput.format === 'mp4'}
+          <video
+            controls
+            class="w-full"
+            src="{API_BASE}/jobs/{job.id}/download/{previewOutput.format}"
+          >
+            <track kind="captions" src="" label="No captions" />
+            Your browser does not support the video element.
+          </video>
+        {:else if previewOutput.format === 'gif'}
+          <img
+            src="{API_BASE}/jobs/{job.id}/download/{previewOutput.format}"
+            alt="Render result"
+            class="w-full"
+          />
+        {:else}
+          <div class="flex aspect-video items-center justify-center bg-gray-900 text-gray-400">
+            <FileArchive class="h-10 w-10" />
+          </div>
+        {/if}
       </div>
     {/if}
 
@@ -84,11 +94,6 @@
           {/each}
         </div>
       {/if}
-    </div>
-
-    <div class="flex items-center gap-2 text-sm text-gray-600">
-      <CheckCircle class="h-4 w-4 text-green-500" />
-      Render complete
     </div>
 
     <button
