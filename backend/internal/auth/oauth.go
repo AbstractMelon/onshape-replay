@@ -25,7 +25,7 @@ type OAuthConfig struct {
 	CallbackURL  string
 }
 
-// oauthCfg returns a golang.org/x/oauth2 config for Onshape.
+// Returns a golang.org/x/oauth2 config for Onshape.
 func oauthCfg(c OAuthConfig) *oauth2.Config {
 	return &oauth2.Config{
 		ClientID:     c.ClientID,
@@ -60,10 +60,8 @@ func NewHandler(cfg OAuthConfig, sessions *Store, log *slog.Logger) *Handler {
 	}
 }
 
-// LoginHandler redirects the user to the Onshape authorization page.
-// It stores the panel's original URL in the session so it can redirect back
-// after the OAuth callback completes.
-//
+// Redirects the user to the Onshape authorization page.
+// It stores the panel's original URL in the session so it can redirect back after the OAuth callback completes.
 // Expected query param: redirect (the panel URL to return to after auth).
 func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	sess, ok := h.sessions.Get(r)
@@ -89,7 +87,7 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
-// CallbackHandler handles the redirect from Onshape after authorization.
+// Handles the redirect from Onshape after authorization.
 func (h *Handler) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 	sess, ok := h.sessions.Get(r)
 	if !ok {
@@ -150,13 +148,13 @@ func (h *Handler) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-// tokenResponse is the structure returned by the token refresh endpoint.
+// The structure returned by the token refresh endpoint.
 type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 }
 
-// RefreshToken exchanges a refresh token for a new access + refresh pair.
+// Exchanges a refresh token for a new access + refresh pair.
 // It updates the session in place and returns the new access token.
 func (h *Handler) RefreshToken(ctx context.Context, sess *Session, w http.ResponseWriter) (string, error) {
 	body := url.Values{}
@@ -203,12 +201,12 @@ func (h *Handler) RefreshToken(ctx context.Context, sess *Session, w http.Respon
 	return tr.AccessToken, nil
 }
 
-// Authenticated reports whether the session has a valid access token.
+// Reports whether the session has a valid access token.
 func Authenticated(sess *Session) bool {
 	return sess != nil && sess.AccessToken != ""
 }
 
-// truncate shortens a string to max runes, appending "..." if truncated.
+// Shortens a string to max runes, appending "..." if truncated.
 func truncate(s string, max int) string {
 	if len(s) <= max {
 		return s

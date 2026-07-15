@@ -27,7 +27,7 @@ function parseFromReferrer(server: string): {
       };
     }
   } catch {
-    // bad referrer URL, ignore
+    // Bad referrer URL, ignore
   }
   return {};
 }

@@ -1,6 +1,6 @@
 // Package auth handles per-user OAuth2 sessions with Onshape.
 // Sessions are stored in memory keyed by a random session ID stored in a
-// cookie. Cookies use SameSite=None + Secure so they work inside iframes.
+// Cookies use SameSite=None + Secure so they work inside iframes.
 package auth
 
 import (
@@ -14,7 +14,7 @@ import (
 const (
 	cookieName = "oreplay_session"
 	// Sessions live for 30 days. The refresh token keeps the Onshape access
-	// alive; if it expires the user must re-authorize.
+	// If it expires the user must re-authorize.
 	sessionTTL = 30 * 24 * time.Hour
 )
 
@@ -26,23 +26,22 @@ type Session struct {
 	CreatedAt    time.Time
 	// State is a random nonce used during the OAuth round-trip to prevent CSRF.
 	OAuthState string
-	// RedirectAfterAuth stores the original panel URL so we can bounce back
-	// after the OAuth callback.
+	// Stores the original panel URL so we can bounce back after the OAuth callback.
 	RedirectAfterAuth string
 }
 
-// Store is an in-memory session store.
+// In-memory session store.
 type Store struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
 }
 
-// NewStore returns an initialized session store.
+// Returns an initialized session store.
 func NewStore() *Store {
 	return &Store{sessions: make(map[string]*Session)}
 }
 
-// Get retrieves the session associated with the request cookie.
+// Retrieves the session associated with the request cookie.
 // Returns nil, false if no valid session exists.
 func (s *Store) Get(r *http.Request) (*Session, bool) {
 	c, err := r.Cookie(cookieName)
@@ -61,7 +60,7 @@ func (s *Store) Get(r *http.Request) (*Session, bool) {
 	return sess, true
 }
 
-// Create creates a new session and sets the cookie on the response.
+// Creates a new session and sets the cookie on the response.
 func (s *Store) Create(w http.ResponseWriter) (*Session, error) {
 	id, err := randomHex(32)
 	if err != nil {
@@ -78,7 +77,7 @@ func (s *Store) Create(w http.ResponseWriter) (*Session, error) {
 	return sess, nil
 }
 
-// Save persists changes to an existing session. Must be called after mutating
+// Persists changes to an existing session. Must be called after mutating
 // a session returned by Get.
 func (s *Store) Save(w http.ResponseWriter, sess *Session) {
 	s.mu.Lock()

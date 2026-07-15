@@ -15,7 +15,7 @@ import (
 	"golang.org/x/image/math/fixed"
 )
 
-// addBackground composites the source PNG (which may have an alpha channel)
+// Composites the source PNG (which may have an alpha channel)
 // onto a solid background of the given hex color (e.g. "#ffffff").
 // If bgHex is empty, white is used. Returns the opaque PNG bytes.
 func addBackground(pngSrc []byte, bgHex string) ([]byte, error) {
@@ -40,7 +40,7 @@ func addBackground(pngSrc []byte, bgHex string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// parseHexColor parses a hex color string like "#ffffff" or "#fff" into
+// Parses a hex color string like "#ffffff" or "#fff" into
 // an opaque color.RGBA. Returns white on parse failure.
 func parseHexColor(s string) color.RGBA {
 	if s == "" {
@@ -61,7 +61,7 @@ func parseHexColor(s string) color.RGBA {
 
 const overlayPadding = 8
 
-// overlayFeatureText draws the feature name as white text with a black
+// Draws the feature name as white text with a black
 // drop shadow in the top-left corner of the PNG frame. Returns the
 // modified PNG bytes.
 func overlayFeatureText(pngSrc []byte, text string) ([]byte, error) {

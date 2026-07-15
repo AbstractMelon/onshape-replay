@@ -6,7 +6,7 @@ import (
 	"net/http"
 )
 
-// writeJSON serializes v to JSON and writes it with the given status code.
+// Serializes v to JSON and writes it with the given status code.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -15,7 +15,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-// handleHealth responds to GET /health.
+// Responds to GET /health.
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",

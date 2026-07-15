@@ -19,7 +19,7 @@ import (
 	"github.com/abstractmelon/onshape-replay/internal/storage"
 )
 
-// authCookieName is the name of the session cookie. Must match auth.cookieName.
+// The name of the session cookie. Must match auth.cookieName.
 const authCookieName = "oreplay_session"
 
 // Services groups all runtime dependencies passed into the router.
@@ -35,7 +35,7 @@ type Services struct {
 	FrontendFS     fs.FS
 }
 
-// NewRouter wires all routes and returns the HTTP handler.
+// Routes all routes and returns the HTTP handler.
 func NewRouter(svc Services) http.Handler {
 	r := chi.NewRouter()
 
@@ -92,11 +92,11 @@ func NewRouter(svc Services) http.Handler {
 	})
 
 	// Static file serving for PNG frames (scoped to job download path above for
-	// zip/mp4/gif; PNG sequence is served directly as frames).
+	// Zip/mp4/gif; PNG sequence is served directly as frames).
 	r.Handle("/storage/*", http.StripPrefix("/storage/", http.FileServer(http.Dir(svc.StorageRoot))))
 
 	// Frontend SPA catch-all: serve embedded static files, fall back to
-	// index.html for client-side routing.
+	// Index.html for client-side routing.
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Compress(5))
 		r.Get("/*", serveFrontend(svc.FrontendFS))
@@ -105,7 +105,7 @@ func NewRouter(svc Services) http.Handler {
 	return r
 }
 
-// requireAuth is middleware that rejects unauthenticated requests with 401.
+// Middleware that rejects unauthenticated requests with 401.
 func requireAuth(sessions *auth.Store, log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +136,7 @@ func requireAuth(sessions *auth.Store, log *slog.Logger) func(http.Handler) http
 	}
 }
 
-// corsMiddleware adds CORS headers to all responses.
+// Adds CORS headers to all responses.
 func corsMiddleware(origins []string) func(http.Handler) http.Handler {
 	allowAll := len(origins) == 1 && origins[0] == "*"
 
@@ -173,7 +173,7 @@ func corsMiddleware(origins []string) func(http.Handler) http.Handler {
 	}
 }
 
-// getSession extracts the session from the request. Panics if missing (should
+// Extracts the session from the request. Panics if missing (should
 // only be called in routes protected by requireAuth middleware).
 func getSession(svc Services, r *http.Request) *auth.Session {
 	sess, ok := svc.Sessions.Get(r)
@@ -183,13 +183,13 @@ func getSession(svc Services, r *http.Request) *auth.Session {
 	return sess
 }
 
-// onshapeClient builds an Onshape client for the authenticated session.
+// Builds an Onshape client for the authenticated session.
 func onshapeClientForReq(svc Services, r *http.Request) *onshape.Client {
 	sess := getSession(svc, r)
 	return svc.Onshape(sess)
 }
 
-// serveFrontend returns a handler that serves the embedded SPA frontend.
+// Returns a handler that serves the embedded SPA frontend.
 // It reads the file directly from the embedded filesystem and writes it with
 // the correct Content-Type. If the path is not found, it falls back to
 // index.html for client-side routing.
@@ -209,7 +209,7 @@ func serveFrontend(embedded fs.FS) http.HandlerFunc {
 				return
 			}
 			// Reset path so the Content-Type is detected from index.html,
-			// not from the original request path.
+			// Not from the original request path.
 			path = "index.html"
 		}
 
@@ -222,7 +222,7 @@ func serveFrontend(embedded fs.FS) http.HandlerFunc {
 	}
 }
 
-// storageLayout returns the storage paths for a job.
+// Returns the storage paths for a job.
 func storageLayout(svc Services, job *render.Job) storage.Paths {
 	return storage.Layout(svc.StorageRoot, job.DocumentID, job.ElementID, job.ID)
 }

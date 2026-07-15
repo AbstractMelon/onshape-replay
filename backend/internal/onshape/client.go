@@ -1,6 +1,7 @@
-// Package onshape wraps the Onshape REST API. No other package in this
+// Wraps the Onshape REST API. No other package in this
 // application calls Onshape directly. All calls require a valid OAuth2 bearer
 // token. The client handles one automatic token refresh on 401.
+
 package onshape
 
 import (
@@ -19,9 +20,8 @@ import (
 
 const baseURL = "https://cad.onshape.com/api/v6"
 
-// TokenRefresher is a function that can exchange a refresh token for a new
-// access token. It is injected from the auth package to avoid a circular
-// dependency.
+// Function that can exchange a refresh token for a new access token.
+// It is injected from the auth package to avoid a circular dependency.
 type TokenRefresher func(ctx context.Context) (newAccessToken string, err error)
 
 // Client wraps the Onshape REST API with bearer-token authentication.
@@ -29,13 +29,13 @@ type Client struct {
 	httpClient     *http.Client
 	log            *slog.Logger
 	tokenRefresher TokenRefresher
-	// getAccessToken returns the current access token from the session.
+	// Returns the current access token from the session.
 	getAccessToken func() string
 }
 
-// NewClient creates a new Onshape API client.
-// getAccessToken must return the session's current access token on each call.
-// refresher will be invoked at most once per request on a 401 to refresh the token.
+// Creates a new Onshape API client.
+// Must return the session's current access token on each call.
+// Will be invoked at most once per request on a 401 to refresh the token.
 func NewClient(log *slog.Logger, getAccessToken func() string, refresher TokenRefresher) *Client {
 	return &Client{
 		httpClient:     &http.Client{},
@@ -45,12 +45,12 @@ func NewClient(log *slog.Logger, getAccessToken func() string, refresher TokenRe
 	}
 }
 
-// get performs an authenticated GET request and decodes the JSON body into dst.
+// Performs an authenticated GET request and decodes the JSON body into dst.
 func (c *Client) get(ctx context.Context, path string, query url.Values, dst any) error {
 	return c.do(ctx, http.MethodGet, path, query, nil, dst)
 }
 
-// postJSON performs an authenticated POST request with a JSON body.
+// Performs an authenticated POST request with a JSON body.
 func (c *Client) postJSON(ctx context.Context, path string, body any, dst any) error {
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -59,7 +59,7 @@ func (c *Client) postJSON(ctx context.Context, path string, body any, dst any) e
 	return c.do(ctx, http.MethodPost, path, nil, strings.NewReader(string(b)), dst)
 }
 
-// getRaw performs an authenticated GET and returns the raw response body bytes.
+// Performs an authenticated GET and returns the raw response body bytes.
 func (c *Client) getRaw(ctx context.Context, path string, query url.Values) ([]byte, string, error) {
 	u := baseURL + path
 	if len(query) > 0 {
@@ -126,7 +126,7 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 
 	// Retry on 429 (rate limit) by honoring the Retry-After header, and on
 	// 401 by refreshing the token once. The loop bounds total attempts so a
-	// persistently rate-limited or unauthorized call eventually fails.
+	// Persistently rate-limited or unauthorized call eventually fails.
 	const maxAttempts = 8
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		// Buffer the body so we can retry without consuming it.
@@ -189,9 +189,9 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	return fmt.Errorf("Onshape API %s: exceeded retry attempts", path)
 }
 
-// retryAfter parses an HTTP Retry-After header (seconds) and returns how long
+// Parses an HTTP Retry-After header (seconds) and returns how long
 // to wait before retrying. It clamps to a sane range so a missing or bogus
-// value still produces a reasonable backoff.
+// Value still produces a reasonable backoff.
 func retryAfter(header string) time.Duration {
 	const (
 		minWait = 2 * time.Second

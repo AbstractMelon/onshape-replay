@@ -15,7 +15,7 @@ import (
 	"github.com/abstractmelon/onshape-replay/internal/storage"
 )
 
-// startJobRequest is the body expected by POST /jobs.
+// The body expected by POST /jobs.
 type startJobRequest struct {
 	DocumentID  string              `json:"documentId"`
 	WorkspaceID string              `json:"workspaceId"`
@@ -23,7 +23,7 @@ type startJobRequest struct {
 	Config      storage.ExportConfig `json:"config"`
 }
 
-// jobResponse is the API representation of a job.
+// The API representation of a job.
 type jobResponse struct {
 	ID                  string               `json:"id"`
 	DocumentID          string               `json:"documentId"`
@@ -62,7 +62,7 @@ func jobToResponse(j *render.Job) jobResponse {
 	}
 }
 
-// makeStartJobHandler handles POST /jobs.
+// Handles POST /jobs.
 func makeStartJobHandler(svc Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req startJobRequest
@@ -103,7 +103,7 @@ func makeStartJobHandler(svc Services) http.HandlerFunc {
 	}
 }
 
-// makeCurrentJobHandler handles GET /jobs/current.
+// Handles GET /jobs/current.
 func makeCurrentJobHandler(svc Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -126,7 +126,7 @@ func makeCurrentJobHandler(svc Services) http.HandlerFunc {
 	}
 }
 
-// makeGetJobHandler handles GET /jobs/{jobId}.
+// Handles GET /jobs/{jobId}.
 func makeGetJobHandler(svc Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		jobID := chi.URLParam(r, "jobId")
@@ -139,7 +139,7 @@ func makeGetJobHandler(svc Services) http.HandlerFunc {
 	}
 }
 
-// makeCancelHandler handles POST /jobs/{jobId}/cancel.
+// Handles POST /jobs/{jobId}/cancel.
 func makeCancelHandler(svc Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		jobID := chi.URLParam(r, "jobId")
@@ -151,7 +151,7 @@ func makeCancelHandler(svc Services) http.HandlerFunc {
 	}
 }
 
-// makeManifestHandler handles GET /jobs/{jobId}/manifest.
+// Handles GET /jobs/{jobId}/manifest.
 func makeManifestHandler(svc Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		jobID := chi.URLParam(r, "jobId")
@@ -179,7 +179,7 @@ func makeManifestHandler(svc Services) http.HandlerFunc {
 	}
 }
 
-// findManifest searches the storage tree for a completed job's manifest on disk.
+// Searches the storage tree for a completed job's manifest on disk.
 // Path layout: {storageRoot}/{documentId}/{elementId}/{jobId}/manifest.json
 func findManifest(storageRoot, jobID string) (*storage.Manifest, error) {
 	matches, err := filepath.Glob(filepath.Join(storageRoot, "*", "*", jobID, "manifest.json"))
@@ -195,7 +195,7 @@ func findManifest(storageRoot, jobID string) (*storage.Manifest, error) {
 	return nil, fmt.Errorf("no manifest found for job %s", jobID)
 }
 
-// makePreviewHandler handles POST /jobs/preview.
+// Handles POST /jobs/preview.
 // Captures a single frame with the given config and returns it as a PNG.
 func makePreviewHandler(svc Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -225,7 +225,7 @@ func makePreviewHandler(svc Services) http.HandlerFunc {
 	}
 }
 
-// makeDownloadHandler handles GET /jobs/{jobId}/download/{format}.
+// Handles GET /jobs/{jobId}/download/{format}.
 func makeDownloadHandler(svc Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		jobID := chi.URLParam(r, "jobId")
@@ -268,7 +268,7 @@ func makeDownloadHandler(svc Services) http.HandlerFunc {
 	}
 }
 
-// lookupJobIDs returns (documentID, elementID) for a job, preferring the
+// Returns (documentID, elementID) for a job, preferring the
 // in-memory queue and falling back to the disk manifest.
 func lookupJobIDs(svc Services, jobID string) (string, string) {
 	if job, ok := svc.Queue.Get(jobID); ok {

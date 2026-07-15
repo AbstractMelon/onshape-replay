@@ -4,22 +4,22 @@ import (
 	"sync"
 )
 
-// ProgressBroadcaster fans a single progress source out to multiple SSE
-// subscribers. Each subscriber gets its own buffered channel.
+// Fans a single progress source out to multiple SSE.
+// Each subscriber gets its own buffered channel.
 type ProgressBroadcaster struct {
 	mu          sync.Mutex
 	subscribers []chan ProgressSnapshot
 	closed      bool
 }
 
-// newProgressBroadcaster creates a new broadcaster.
+// Creates a new broadcaster.
 func newProgressBroadcaster() *ProgressBroadcaster {
 	return &ProgressBroadcaster{}
 }
 
 // Subscribe registers a new subscriber and returns a receive-only channel.
-// The channel is closed when the broadcaster is closed (job reaches terminal
-// state). Subscribers should drain and discard after close.
+// The channel is closed when the broadcaster is closed (job reaches terminal State).
+// Subscribers should drain and discard after close.
 func (b *ProgressBroadcaster) Subscribe() <-chan ProgressSnapshot {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -32,7 +32,7 @@ func (b *ProgressBroadcaster) Subscribe() <-chan ProgressSnapshot {
 	return ch
 }
 
-// Publish sends a snapshot to all current subscribers.
+// Sends a snapshot to all current subscribers.
 // Slow subscribers are skipped (non-blocking send with drop).
 func (b *ProgressBroadcaster) Publish(snap ProgressSnapshot) {
 	b.mu.Lock()
@@ -42,12 +42,12 @@ func (b *ProgressBroadcaster) Publish(snap ProgressSnapshot) {
 		case ch <- snap:
 		default:
 			// Drop the update for a slow subscriber rather than blocking the
-			// pipeline goroutine.
+			// Pipeline goroutine.
 		}
 	}
 }
 
-// Close signals all subscribers that the job is done and removes them.
+// Signals all subscribers that the job is done and removes them.
 func (b *ProgressBroadcaster) Close() {
 	b.mu.Lock()
 	defer b.mu.Unlock()

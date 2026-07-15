@@ -13,12 +13,12 @@ var (
 	Resolution4K    = Resolution{Width: 3840, Height: 2160, Label: "4K"}
 )
 
-// Resolutions maps resolution label strings to Resolution structs.
+// Maps resolution label strings to Resolution structs.
 var Resolutions = map[string]Resolution{
-	"720p": Resolution720p,
+	"720p":  Resolution720p,
 	"1080p": Resolution1080p,
-	"4k":   Resolution4K,
-	"4K":   Resolution4K,
+	"4k":    Resolution4K,
+	"4K":    Resolution4K,
 }
 
 // Default resolution when none specified.

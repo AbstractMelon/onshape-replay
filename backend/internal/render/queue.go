@@ -12,11 +12,11 @@ import (
 type Queue struct {
 	mu   sync.RWMutex
 	byID map[string]*Job
-	// byPart maps "docId:wsId:elemId" -> most recent job ID for that Part Studio.
+	// Maps "docId:wsId:elemId" -> most recent job ID for that Part Studio.
 	byPart map[string]string
 }
 
-// NewQueue creates an initialized job queue.
+// Creates an initialized job queue.
 func NewQueue() *Queue {
 	return &Queue{
 		byID:   make(map[string]*Job),
@@ -24,7 +24,7 @@ func NewQueue() *Queue {
 	}
 }
 
-// partKey returns the composite index key for a Part Studio identity tuple.
+// Returns the composite index key for a Part Studio identity tuple.
 func partKey(documentID, workspaceID, elementID string) string {
 	return documentID + ":" + workspaceID + ":" + elementID
 }
@@ -45,8 +45,7 @@ func (q *Queue) Get(id string) (*Job, bool) {
 	return j, ok
 }
 
-// CurrentForPart returns the most recent job (running or completed) for a
-// given Part Studio identity tuple.
+// Returns the most recent job (running or completed) for a given Part Studio identity tuple.
 func (q *Queue) CurrentForPart(documentID, workspaceID, elementID string) (*Job, bool) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
@@ -58,7 +57,7 @@ func (q *Queue) CurrentForPart(documentID, workspaceID, elementID string) (*Job,
 	return j, ok
 }
 
-// UpdateProgress updates the progress fields of a job and publishes to subscribers.
+// Upddates the progress fields of a job and publishes to subscribers.
 // Must be called from the pipeline goroutine.
 func (q *Queue) UpdateProgress(jobID string, featureIndex int, featureName string, total int, startedAt time.Time) {
 	q.mu.Lock()
@@ -88,7 +87,7 @@ func (q *Queue) UpdateProgress(jobID string, featureIndex int, featureName strin
 	}
 }
 
-// SetStatus transitions a job to a new status and publishes the change.
+// Transitions a job to a new status and publishes the change.
 func (q *Queue) SetStatus(jobID string, status Status, errMsg string) {
 	q.mu.Lock()
 	job, ok := q.byID[jobID]
@@ -118,7 +117,7 @@ func (q *Queue) SetStatus(jobID string, status Status, errMsg string) {
 	}
 }
 
-// SetOutputs stores the output file list for a completed job.
+// Stores the output file list for a completed job.
 func (q *Queue) SetOutputs(jobID string, outputs []storage.OutputFile) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -127,8 +126,8 @@ func (q *Queue) SetOutputs(jobID string, outputs []storage.OutputFile) {
 	}
 }
 
-// Subscribe returns a channel that receives progress snapshots for the given
-// job. The channel is closed when the job reaches a terminal state.
+// Returns a channel that receives progress snapshots for the given
+// the channel is closed when the job reaches a terminal state.
 // Returns nil, false if the job does not exist.
 func (q *Queue) Subscribe(jobID string) (<-chan ProgressSnapshot, bool) {
 	q.mu.RLock()
@@ -146,7 +145,7 @@ func (q *Queue) Subscribe(jobID string) (<-chan ProgressSnapshot, bool) {
 	return broadcaster.Subscribe(), true
 }
 
-// Snapshot returns a point-in-time copy of job progress.
+// Returns a point-in-time copy of job progress.
 func (q *Queue) Snapshot(jobID string) (ProgressSnapshot, bool) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
@@ -157,8 +156,8 @@ func (q *Queue) Snapshot(jobID string) (ProgressSnapshot, bool) {
 	return job.Snapshot(), true
 }
 
-// Cancel signals a running job to stop. The pipeline goroutine is responsible
-// for actual cleanup; this merely cancels its context.
+// Signals a running job to stop. The pipeline goroutine is responsible
+// For actual cleanup; this merely cancels its context.
 func (q *Queue) Cancel(jobID string) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()

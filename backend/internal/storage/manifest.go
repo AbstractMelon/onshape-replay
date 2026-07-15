@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// JobStatus mirrors the render package's status enum at the manifest level.
+// Mirrors the render package's status enum at the manifest level.
 type JobStatus string
 
 const (
@@ -53,7 +53,7 @@ type Manifest struct {
 	Outputs []OutputFile `json:"outputs,omitempty"`
 }
 
-// ExportConfig is a snapshot of the user's export configuration at job-start time.
+// Snapshot of the user's export configuration at job-start time.
 type ExportConfig struct {
 	Resolution       string   `json:"resolution"`
 	FrameRate        int      `json:"frameRate"`
@@ -75,14 +75,14 @@ type ExportConfig struct {
 	Zoom             float64  `json:"zoom"`
 }
 
-// OutputFile describes a generated output file.
+// Format for output files.
 type OutputFile struct {
 	Format string `json:"format"`
 	Path   string `json:"path"`
 	Size   int64  `json:"size"`
 }
 
-// WriteManifest serializes and writes the manifest to disk.
+// Serializes and writes the manifest to disk.
 func WriteManifest(path string, m *Manifest) error {
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
@@ -91,7 +91,7 @@ func WriteManifest(path string, m *Manifest) error {
 	return os.WriteFile(path, b, 0o644)
 }
 
-// ReadManifest reads and deserializes a manifest from disk.
+// Reads and deserializes a manifest from disk.
 func ReadManifest(path string) (*Manifest, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {

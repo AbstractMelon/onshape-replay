@@ -14,13 +14,13 @@ type Encoder struct {
 	BinPath string
 }
 
-// NewEncoder creates an Encoder using the given binary path.
+// Creates an Encoder using the given binary path.
 // Pass "ffmpeg" to use PATH lookup.
 func NewEncoder(binPath string) *Encoder {
 	return &Encoder{BinPath: binPath}
 }
 
-// CheckAvailable verifies that the ffmpeg binary is reachable.
+// Verifies that the ffmpeg binary is reachable.
 func (e *Encoder) CheckAvailable(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, e.BinPath, "-version")
 	if err := cmd.Run(); err != nil {
@@ -29,11 +29,11 @@ func (e *Encoder) CheckAvailable(ctx context.Context) error {
 	return nil
 }
 
-// EncodeMP4 encodes a PNG frame sequence to an H.264 MP4.
-// frameGlob must be an ffmpeg-compatible frame pattern, e.g. "frames/frame_%04d.png".
+// Encodes a PNG frame sequence to an H.264 MP4.
+// must be an ffmpeg-compatible frame pattern, e.g. "frames/frame_%04d.png".
 func (e *Encoder) EncodeMP4(ctx context.Context, frameGlob, outputPath string, fps int, res Resolution) error {
-	// libx264 with yuv420p for maximum compatibility.
-	// scale filter ensures the output matches the requested resolution.
+	// Libx264 with yuv420p for maximum compatibility.
+	// Scale filter ensures the output matches the requested resolution.
 	args := []string{
 		"-y",
 		"-framerate", fmt.Sprintf("%d", fps),
@@ -49,7 +49,7 @@ func (e *Encoder) EncodeMP4(ctx context.Context, frameGlob, outputPath string, f
 	return e.run(ctx, args)
 }
 
-// EncodeGIF encodes a PNG frame sequence to an animated GIF.
+// Encodes a PNG frame sequence to an animated GIF.
 // GIF supports transparency but not true-color; the palette filter improves quality.
 func (e *Encoder) EncodeGIF(ctx context.Context, frameGlob, outputPath string, fps int, res Resolution) error {
 	// Two-pass GIF: generate palette then apply it.
@@ -83,7 +83,7 @@ func (e *Encoder) EncodeGIF(ctx context.Context, frameGlob, outputPath string, f
 	return nil
 }
 
-// run executes ffmpeg with the given arguments and captures stderr for errors.
+// Executes ffmpeg with the given arguments and captures stderr for errors.
 func (e *Encoder) run(ctx context.Context, args []string) error {
 	cmd := exec.CommandContext(ctx, e.BinPath, args...)
 	var stderr bytes.Buffer

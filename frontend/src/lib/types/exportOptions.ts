@@ -9,7 +9,7 @@ export interface ExportConfig {
   holdFirst: number;
   holdLast: number;
   fileNaming: string;
-  formats: ('mp4' | 'gif' | 'png' | 'zip')[];
+  formats: ('mp4' | 'gif' | 'zip')[];
   featureLabel: boolean;
   skipSketches: boolean;
   skipSuppressed: boolean;
@@ -30,7 +30,7 @@ export const DEFAULT_EXPORT_CONFIG: ExportConfig = {
   holdFirst: 0,
   holdLast: 0,
   fileNaming: 'frame_{index}',
-  formats: ['mp4'],
+  formats: ['mp4', 'zip'],
   featureLabel: false,
   skipSketches: true,
   skipSuppressed: true,

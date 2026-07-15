@@ -16,7 +16,7 @@ type BoundingBox struct {
 	HighZ float64 `json:"highZ"`
 }
 
-// GetBoundingBoxes returns the axis-aligned bounding box of all visible parts
+// Returns the axis-aligned bounding box of all visible parts
 // in the Part Studio. The returned values are in meters and are approximate
 // (meant for graphics/visualization, not precise measurement).
 func (c *Client) GetBoundingBoxes(ctx context.Context, documentID, wvmType, wvmID, elementID string, includeHidden, includeWireBodies bool) (*BoundingBox, error) {

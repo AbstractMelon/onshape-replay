@@ -18,17 +18,17 @@ type Feature struct {
 	Suppressed bool `json:"suppressed"`
 }
 
-// featureListResponse is the raw shape returned by getPartStudioFeatures.
+// The raw shape returned by getPartStudioFeatures.
 // The v6 API returns feature objects directly in the features array
 // (NOT wrapped in a "feature" key). Individual features can be compact
 // (BTMFeature-134) or expanded (BTMSketch-151 etc.) depending on whether
-// the API includes their entity/geometry detail inline.
+	// The API includes their entity/geometry detail inline.
 type featureListResponse struct {
 	Features      []featureFlatEntry `json:"features"`
 	RollbackIndex int                `json:"rollbackIndex"`
 }
 
-// featureFlatEntry parses both compact (BTMFeature-134) and expanded
+// Parses both compact (BTMFeature-134) and expanded
 // (BTMSketch-151 etc.) feature representations. Compact entries carry
 // featureId/featureType/name/suppressed directly; expanded sketches carry
 // entityId/suppressionState and use subFeatures for folder children.
@@ -43,7 +43,7 @@ type featureFlatEntry struct {
 	SubFeatures      []featureFlatEntry `json:"subFeatures"`
 }
 
-// deriveFeatureType infers a feature type string from the btType discriminator
+// Infers a feature type string from the btType discriminator
 // when the feature's own featureType field is absent (e.g. expanded sketches).
 func deriveFeatureType(btType string) string {
 	if strings.Contains(btType, "Sketch") {
@@ -52,7 +52,7 @@ func deriveFeatureType(btType string) string {
 	return ""
 }
 
-// flatten expands the (possibly nested) feature list into a single slice in
+// Expands the (possibly nested) feature list into a single slice in
 // document order. Folder entries are kept in place (they occupy a rollback
 // position in Onshape's ordering) followed by their children, recursively.
 // This matches the order Onshape uses for its rollbackIndex.
@@ -88,7 +88,7 @@ func flatten(entries []featureFlatEntry, out *[]Feature) {
 // FolderType is the featureType Onshape uses for folder features.
 const FolderType = "folder"
 
-// GetFeatureList returns the ordered list of features in the Part Studio,
+// Returns the ordered list of features in the Part Studio,
 // the current rollback bar index, and the maximum valid rollback index.
 // Folders are flattened in document order so the returned indices line up
 // with Onshape's rollbackIndex. The maxRollbackIndex is the count of

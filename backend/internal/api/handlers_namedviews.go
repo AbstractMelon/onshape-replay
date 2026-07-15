@@ -4,7 +4,7 @@ import (
 	"net/http"
 )
 
-// makeNamedViewsHandler handles GET /named-views.
+// Handles GET /named-views.
 // It proxies the Onshape namedViews API for the given document/element.
 func makeNamedViewsHandler(svc Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

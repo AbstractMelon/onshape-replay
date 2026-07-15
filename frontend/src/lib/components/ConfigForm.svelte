@@ -61,13 +61,10 @@
   const formatOptions = [
     { value: 'mp4', label: 'MP4' },
     { value: 'gif', label: 'GIF' },
-    { value: 'png', label: 'PNG sequence' },
-    { value: 'zip', label: 'ZIP' }
+    { value: 'zip', label: 'ZIP (PNG frames)' }
   ] as const;
 
-  const supportsTransparency = $derived(
-    config.formats.includes('png') || config.formats.includes('zip')
-  );
+  const supportsTransparency = $derived(config.formats.includes('zip'));
 
   const isNamedView = $derived(!!config.viewMatrix);
 
@@ -118,13 +115,13 @@
     } else {
       config.viewMatrix = vm.join(',');
     }
-    // cameraViewport is [left, right, bottom, top] in model-space meters.
+    // CameraViewport is [left, right, bottom, top] in model-space meters.
     // Used by the backend to compute pixelSize for exact viewport framing.
     config.cameraViewport = nv.cameraViewport.join(',');
     config.cameraMode = name;
   }
 
-  function toggleFormat(format: 'mp4' | 'gif' | 'png' | 'zip') {
+  function toggleFormat(format: 'mp4' | 'gif' | 'zip') {
     if (config.formats.includes(format)) {
       if (config.formats.length <= 1) return;
       config.formats = config.formats.filter((f) => f !== format);
@@ -363,20 +360,22 @@
     </div>
   </div>
 
-  <div>
-    <label for="fileNaming" class="mb-1.5 block text-sm font-medium text-gray-700">
-      File naming pattern
-    </label>
-    <input
-      id="fileNaming"
-      type="text"
-      bind:value={config.fileNaming}
-      class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-    />
-    <p class="mt-1 text-xs text-gray-500">
-      Use <code class="rounded bg-gray-100 px-1">{'{index}'}</code> as a placeholder for the frame number.
-    </p>
-  </div>
+  {#if config.formats.includes('zip')}
+    <div>
+      <label for="fileNaming" class="mb-1.5 block text-sm font-medium text-gray-700">
+        File naming pattern
+      </label>
+      <input
+        id="fileNaming"
+        type="text"
+        bind:value={config.fileNaming}
+        class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+      />
+      <p class="mt-1 text-xs text-gray-500">
+        Use <code class="rounded bg-gray-100 px-1">{'{index}'}</code> as a placeholder for the frame number.
+      </p>
+    </div>
+  {/if}
 
   <div>
     <span class="mb-1.5 block text-sm font-medium text-gray-700">Output formats</span>

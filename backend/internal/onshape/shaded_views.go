@@ -7,7 +7,7 @@ import (
 	"net/url"
 )
 
-// ShadedViewConfig configures how the shaded view is captured.
+// Configures how the shaded view is captured.
 type ShadedViewConfig struct {
 	// OutputHeight in pixels (e.g. 720, 1080, 2160).
 	OutputHeight int
@@ -24,18 +24,17 @@ type ShadedViewConfig struct {
 	ViewMatrix string
 	// Transparent requests a transparent background when the output supports it.
 	// When false, the pipeline composites the transparent PNG onto a solid
-	// background before writing the frame.
+	// Background before writing the frame.
 	Transparent bool
 }
 
-// shadedViewsResponse is the raw API response from getPartStudioShadedViews.
+// The raw API response from getPartStudioShadedViews.
 type shadedViewsResponse struct {
 	Images []string `json:"images"`
 }
 
-// GetShadedView captures a shaded PNG of the Part Studio and returns the raw
-// image bytes. The Onshape v6 API returns base64-encoded PNG strings inside a
-// JSON envelope; this method decodes them and returns raw PNG bytes.
+// Captures a shaded PNG of the Part Studio and returns the raw image bytes
+// The Onshape v6 API returns base64-encoded PNG strings inside a JSON envelope
 func (c *Client) GetShadedView(ctx context.Context, documentID, wvmType, wvmID, elementID string, cfg ShadedViewConfig) ([]byte, error) {
 	path := fmt.Sprintf("/partstudios/d/%s/%s/%s/e/%s/shadedviews",
 		documentID, wvmType, wvmID, elementID)

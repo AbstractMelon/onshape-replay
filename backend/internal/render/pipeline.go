@@ -27,7 +27,7 @@ type Dependencies struct {
 	StorageRoot string
 }
 
-// StartPipeline launches the render pipeline in a background goroutine.
+// Launches the render pipeline in a background goroutine.
 // It returns immediately; progress is observable via Queue.Subscribe.
 func StartPipeline(job *Job, deps Dependencies) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -65,7 +65,7 @@ func StartPipeline(job *Job, deps Dependencies) {
 	}()
 }
 
-// runPipeline is the synchronous render logic running inside a goroutine.
+// The synchronous render logic running inside a goroutine.
 func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 	log := deps.Log.With("jobId", job.ID)
 	paths := storage.Layout(deps.StorageRoot, job.DocumentID, job.ElementID, job.ID)
@@ -91,7 +91,7 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 	deps.Queue.mu.Unlock()
 
 	// Restore the original rollback position after the job completes or fails,
-	// so the user's workspace is not left in a rolled-back state.
+	// So the user's workspace is not left in a rolled-back state.
 	defer func() {
 		cleanCtx := context.Background()
 		log.Info("restoring rollback position", "index", origRollback)
@@ -132,7 +132,7 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 	}
 
 	// Set total feature count on the job so API consumers see a non-zero
-	// value immediately, not just after the first frame is captured.
+	// Value immediately, not just after the first frame is captured.
 	total := len(steps)
 	if total == 0 {
 		return fmt.Errorf("no features to render after applying filters")
@@ -228,7 +228,7 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 		}
 
 		// Onshape always returns transparent PNGs. Composite onto a solid
-		// background unless the user explicitly requested transparency.
+		// Background unless the user explicitly requested transparency.
 		if !cfg.Transparent && !viewCfg.Transparent {
 			bgBytes, bgErr := addBackground(pngBytes, cfg.BgColor)
 			if bgErr != nil {
@@ -313,16 +313,11 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 
 	if slices.Contains(cfg.Formats, "zip") {
 		log.Info("creating ZIP")
-		if err := createZIP(paths); err != nil {
+		if err := createZIP(paths, cfg.FileNaming); err != nil {
 			return fmt.Errorf("create ZIP: %w", err)
 		}
 		size := fileSize(paths.OutputZIP)
 		outputs = append(outputs, storage.OutputFile{Format: "zip", Path: paths.OutputZIP, Size: size})
-	}
-
-	if slices.Contains(cfg.Formats, "png") {
-		// PNG sequence: frames are already on disk, just record them.
-		outputs = append(outputs, storage.OutputFile{Format: "png", Path: paths.FramesDir, Size: 0})
 	}
 
 	deps.Queue.SetOutputs(job.ID, outputs)
@@ -353,8 +348,8 @@ func runPipeline(ctx context.Context, job *Job, deps Dependencies) error {
 	return nil
 }
 
-// applyRollback sets the workspace rollback bar. It tries the requested index
-// first; if Onshape rejects it (409 for an invalid position, e.g. inside a
+// Sets the workspace rollback bar. It tries the requested index
+// First; if Onshape rejects it (409 for an invalid position, e.g. inside a
 // folder group), it falls back to -1 (the "show all" sentinel) and then
 // scans backward from the desired index to find a valid boundary. Unlike
 // earlier versions, this does NOT call GetFeatureList to verify. We wait a
@@ -398,7 +393,7 @@ wait:
 	return nil
 }
 
-// trySetRollback calls SetRollback and ignores errors only for invalid indices.
+// Calls SetRollback and ignores errors only for invalid indices.
 func trySetRollback(ctx context.Context, deps Dependencies, job *Job, index int) error {
 	if index < 0 {
 		return fmt.Errorf("invalid index %d", index)
@@ -406,7 +401,7 @@ func trySetRollback(ctx context.Context, deps Dependencies, job *Job, index int)
 	return deps.Onshape.SetRollback(ctx, job.DocumentID, "w", job.WorkspaceID, job.ElementID, index)
 }
 
-// toStorageFeatures converts onshape features into the storage-local manifest type.
+// Converts onshape features into the storage-local manifest type.
 func toStorageFeatures(in []onshape.Feature) []storage.Feature {
 	out := make([]storage.Feature, len(in))
 	for i, f := range in {
@@ -420,10 +415,10 @@ func toStorageFeatures(in []onshape.Feature) []storage.Feature {
 	return out
 }
 
-// shouldSkip returns true if a feature should be excluded from the render.
+// Returns true if a feature should be excluded from the render.
 func shouldSkip(f onshape.Feature, cfg storage.ExportConfig) bool {
 	// Folder features organize other features and produce no geometry, so
-	// they never get their own capture frame.
+	// They never get their own capture frame.
 	if f.Type == onshape.FolderType {
 		return true
 	}
@@ -443,7 +438,7 @@ func shouldSkip(f onshape.Feature, cfg storage.ExportConfig) bool {
 	return false
 }
 
-// isGeometryFeature returns true for feature types known to produce 3D geometry.
+// Returns true for feature types known to produce 3D geometry.
 func isGeometryFeature(featureType string) bool {
 	geometryTypes := []string{
 		"extrude", "revolve", "loft", "sweep", "shell", "fillet", "chamfer",
@@ -458,7 +453,7 @@ func isGeometryFeature(featureType string) bool {
 	return false
 }
 
-// setViewMatrix applies a standard camera orientation based on cameraMode.
+// Applies a standard camera orientation based on cameraMode.
 // Onshape's shadedViews API accepts named views ("isometric", "front", "top"),
 // a 16-value column-major transformation matrix, or a named view reference.
 // If viewMatrix is non-empty it takes precedence over cameraMode.
@@ -479,7 +474,7 @@ func setViewMatrix(cameraMode, viewMatrix string, cfg *onshape.ShadedViewConfig)
 	}
 }
 
-// computePixelSize fetches the bounding box of the completed model (at the
+// Fetches the bounding box of the completed model (at the
 // original rollback state) and returns the pixel size that frames it at 75%
 // fill. Returns 0 if the API call fails, which signals callers to use a
 // fallback (e.g. Onshape's default zoom).
@@ -495,7 +490,7 @@ func computePixelSize(ctx context.Context, deps Dependencies, job *Job, viewCfg 
 	return computePixelSizeFromBBox(bbox, viewCfg, fill), nil
 }
 
-// pixelSizeFromCameraViewport computes the pixel size from a named view's
+// Computes the pixel size from a named view's
 // cameraViewport values. The viewport is [left, right, bottom, top] in
 // model-space meters. This produces exact framing that matches the named
 // view, unlike bounding-box approximations.
@@ -526,7 +521,7 @@ func pixelSizeFromCameraViewport(cameraViewport string, outputWidth, outputHeigh
 	return py
 }
 
-// computePixelSizeFromBBox computes the pixel size that frames the given
+// Computes the pixel size that frames the given
 // bounding box within the viewport at the specified fill fraction. For
 // standard views (isometric, front, top) it uses the exact isometric
 // projection formula. For named/arbitrary view matrices it uses the max
@@ -553,7 +548,7 @@ func computePixelSizeFromBBox(bbox *onshape.BoundingBox, viewCfg onshape.ShadedV
 	return modelSize / (viewportSize * fill)
 }
 
-// isometricPixelSize computes the pixelSize needed to frame the bounding box
+// Computes the pixelSize needed to frame the bounding box
 // within the viewport under Onshape's isometric view projection. Onshape uses
 // a standard isometric orthographic camera (view from (1,1,1), Z-up):
 //
@@ -567,7 +562,7 @@ func isometricPixelSize(bbox *onshape.BoundingBox, width, height int, fill float
 	invSqrt6 := 1.0 / math.Sqrt(6)
 
 	// Project the 8 corners of the bbox through Onshape's isometric
-	// view projection. All three axes are equally foreshortened.
+	// View projection. All three axes are equally foreshortened.
 	corners := [8][2]float64{
 		{(bbox.LowX - bbox.LowY) * invSqrt2, (bbox.LowX + bbox.LowY - 2*bbox.LowZ) * invSqrt6},
 		{(bbox.HighX - bbox.LowY) * invSqrt2, (bbox.HighX + bbox.LowY - 2*bbox.LowZ) * invSqrt6},
@@ -620,8 +615,11 @@ func fileSize(path string) int64 {
 	return info.Size()
 }
 
-// createZIP packages all frames into a ZIP archive.
-func createZIP(paths storage.Paths) error {
+// Packages all frames into a ZIP archive.
+// If namePattern is non-empty, each frame entry in the archive is renamed
+// according to the pattern with {index} replaced by the frame number.
+// Otherwise the original filename (frame_0001.png) is used.
+func createZIP(paths storage.Paths, namePattern string) error {
 	zf, err := os.Create(paths.OutputZIP)
 	if err != nil {
 		return err
@@ -640,11 +638,22 @@ func createZIP(paths storage.Paths) error {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".png") {
 			continue
 		}
+
+		entryName := e.Name()
+		if namePattern != "" {
+			frameNum := 0
+			if _, err := fmt.Sscanf(e.Name(), "frame_%d.png", &frameNum); err == nil {
+				entryName = strings.ReplaceAll(namePattern, "{index}", fmt.Sprintf("%d", frameNum))
+			} else {
+				return fmt.Errorf("unexpected frame filename format: %s", e.Name())
+			}
+		}
+
 		src, err := os.Open(paths.FramesDir + "/" + e.Name())
 		if err != nil {
 			return err
 		}
-		dst, err := w.Create(e.Name())
+		dst, err := w.Create(entryName)
 		if err != nil {
 			src.Close()
 			return err

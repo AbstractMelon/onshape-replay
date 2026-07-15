@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { Loader2 } from 'lucide-svelte';
-  import { sendApplicationInit } from '$lib/onshape/messaging';
   import {
     checkAuthStatus,
     redirectToLogin,
@@ -86,7 +85,7 @@
         const snapshot: ProgressSnapshot = JSON.parse(e.data);
         jobStore.applySnapshot(snapshot);
       } catch {
-        // ignore malformed data
+        // Ignore malformed data
       }
     });
 
@@ -96,7 +95,7 @@
         const snapshot: ProgressSnapshot = JSON.parse(e.data);
         handleDone(snapshot);
       } catch {
-        // ignore malformed data
+        // Ignore malformed data
       }
     });
 
@@ -227,7 +226,12 @@
       return;
     }
 
-    sendApplicationInit(context);
+    if (context.server) {
+      window.parent.postMessage(
+        { documentId: context.documentId, workspaceId: context.workspaceId, elementId: context.elementId, messageName: 'applicationInit' },
+        context.server
+      );
+    }
 
     if (!context.documentId || !context.workspaceId || !context.elementId) {
       state = 'waitingForContext';

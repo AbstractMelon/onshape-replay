@@ -3,7 +3,7 @@ import type { ExportConfig } from './exportOptions';
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface OutputFile {
-  format: 'mp4' | 'gif' | 'zip' | 'png';
+  format: 'mp4' | 'gif' | 'zip';
   path: string;
   size: number;
 }

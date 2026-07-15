@@ -11,7 +11,7 @@ type NamedViewsResponse struct {
 	NamedViews map[string]NamedViewData `json:"namedViews"`
 }
 
-// NamedViewData contains the view data for a single named view.
+// Contains the view data for a single named view.
 type NamedViewData struct {
 	Perspective    bool      `json:"perspective"`
 	CameraViewport []float64 `json:"cameraViewport"`
@@ -19,9 +19,9 @@ type NamedViewData struct {
 	ViewMatrix     []float64 `json:"viewMatrix"`
 }
 
-// GetNamedViews fetches all named views for a Part Studio element.
+// Fetches all named views for a Part Studio element.
 // The namedViews endpoint uses d/{did}/e/{eid} (no wvm/wvid in the path).
-// skipPerspective and includeSectionCutViews are forwarded as query params.
+// SkipPerspective and includeSectionCutViews are forwarded as query params.
 func (c *Client) GetNamedViews(ctx context.Context, documentID, elementID string, skipPerspective, includeSectionCutViews bool) (*NamedViewsResponse, error) {
 	path := fmt.Sprintf("/partstudios/d/%s/e/%s/namedViews",
 		documentID, elementID)

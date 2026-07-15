@@ -50,24 +50,24 @@ type Job struct {
 	// Output files populated on completion.
 	Outputs []storage.OutputFile
 
-	// cancel stops the pipeline goroutine.
+	// Stops the pipeline goroutine.
 	cancel context.CancelFunc
 
-	// progress is the broadcaster for SSE subscribers.
+	// The broadcaster for SSE subscribers.
 	progress *ProgressBroadcaster
 }
 
 // ProgressSnapshot is a point-in-time copy of job progress safe to share
-// across goroutines without holding a lock.
+// Across goroutines without holding a lock.
 type ProgressSnapshot struct {
-	JobID               string              `json:"jobId"`
-	Status              Status              `json:"status"`
-	CurrentFeatureIndex int                 `json:"currentFeatureIndex"`
-	CurrentFeatureName  string              `json:"currentFeatureName"`
-	TotalFeatures       int                 `json:"totalFeatures"`
-	PercentComplete     float64             `json:"percentComplete"`
-	EstimatedRemaining  time.Duration       `json:"estimatedRemaining"`
-	ErrorMsg            string              `json:"errorMsg"`
+	JobID               string               `json:"jobId"`
+	Status              Status               `json:"status"`
+	CurrentFeatureIndex int                  `json:"currentFeatureIndex"`
+	CurrentFeatureName  string               `json:"currentFeatureName"`
+	TotalFeatures       int                  `json:"totalFeatures"`
+	PercentComplete     float64              `json:"percentComplete"`
+	EstimatedRemaining  time.Duration        `json:"estimatedRemaining"`
+	ErrorMsg            string               `json:"errorMsg"`
 	Outputs             []storage.OutputFile `json:"outputs,omitempty"`
 }
 

@@ -9,9 +9,8 @@ import (
 	"github.com/abstractmelon/onshape-replay/internal/storage"
 )
 
-// CapturePreview captures a single shaded-view frame of the Part Studio using
-// the given export config. It returns raw PNG bytes. Use this for quick
-// previews before committing to a full multi-frame render.
+// Captures a single shaded-view frame of the Part Studio using the given export config.
+// It returns raw PNG bytes.
 func CapturePreview(ctx context.Context, client *onshape.Client, documentID, wvmType, wvmID, elementID string, cfg storage.ExportConfig) ([]byte, error) {
 	res := ffmpeg.DefaultResolution
 	if r, ok := ffmpeg.Resolutions[cfg.Resolution]; ok {

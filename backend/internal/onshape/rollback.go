@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// rollbackBody is the JSON body sent to updateRollback.
+// The JSON body sent to updateRollback.
 // Per the Onshape API, the body is a single top-level "rollbackIndex" integer.
 // Features with a 0-based entry index >= rollbackIndex are rolled back
 // (suppressed). A value of -1 is an alias for "end of the feature list"
@@ -14,7 +14,7 @@ type rollbackBody struct {
 	RollbackIndex int `json:"rollbackIndex"`
 }
 
-// SetRollback moves the rollback bar so that features at 0-based positions
+// Moves the rollback bar so that features at 0-based positions
 // >= index are rolled back and features 0..index-1 remain active.
 // To show only feature 0, pass index = 1; to show all N features, pass
 // index = N (or -1).

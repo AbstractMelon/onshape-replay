@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-// Paths returns all derived paths for a given job.
+// Returns all derived paths for a given job.
 type Paths struct {
 	JobDir    string
 	FramesDir string
@@ -17,7 +17,7 @@ type Paths struct {
 	Manifest  string
 }
 
-// Layout returns the Paths for a given job, rooted at storageRoot.
+// Returns the Paths for a given job, rooted at storageRoot.
 func Layout(storageRoot, documentID, elementID, jobID string) Paths {
 	jobDir := filepath.Join(storageRoot, documentID, elementID, jobID)
 	return Paths{
@@ -30,17 +30,17 @@ func Layout(storageRoot, documentID, elementID, jobID string) Paths {
 	}
 }
 
-// FrameName returns the zero-padded filename for a frame at the given index.
+// Returns the zero-padded filename for a frame at the given index.
 func FrameName(index int) string {
 	return fmt.Sprintf("frame_%04d.png", index)
 }
 
-// FramePath returns the full path for frame at index.
+// Returns the full path for frame at index.
 func FramePath(paths Paths, index int) string {
 	return filepath.Join(paths.FramesDir, FrameName(index))
 }
 
-// FrameGlob returns the glob pattern for ffmpeg frame input.
+// Returns the glob pattern for ffmpeg frame input.
 func FrameGlob(paths Paths) string {
 	return filepath.Join(paths.FramesDir, "frame_%04d.png")
 }

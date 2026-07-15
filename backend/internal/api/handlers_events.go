@@ -9,9 +9,9 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// makeEventsHandler handles GET /jobs/{jobId}/events.
+// Handles GET /jobs/{jobId}/events.
 // It streams Server-Sent Events to the client until the job reaches a terminal
-// state or the client disconnects.
+// State or the client disconnects.
 func makeEventsHandler(svc Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		jobID := chi.URLParam(r, "jobId")
@@ -37,7 +37,7 @@ func makeEventsHandler(svc Services) http.HandlerFunc {
 		flusher.Flush()
 
 		// Send the current snapshot immediately so the client gets state even
-		// if it subscribes after the job has progressed.
+		// If it subscribes after the job has progressed.
 		snap, hasSnap := svc.Queue.Snapshot(jobID)
 		if hasSnap {
 			if err := sendSSEEvent(w, "progress", snap); err == nil {
@@ -114,7 +114,7 @@ func makeEventsHandler(svc Services) http.HandlerFunc {
 	}
 }
 
-// sendSSEEvent writes a single SSE event with the given name and JSON data.
+// Writes a single SSE event with the given name and JSON data.
 func sendSSEEvent(w http.ResponseWriter, name string, data any) error {
 	b, err := json.Marshal(data)
 	if err != nil {
